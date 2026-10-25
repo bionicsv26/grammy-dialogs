@@ -1,13 +1,27 @@
-import 'dotenv/config';
 import { Bot, session, InlineKeyboard } from 'grammy';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { config } from './config.js';
 import { DialogManager, type DialogContext } from './dialog-manager.js';
 
-const token = process.env.BOT_TOKEN;
-if (!token) {
-  throw new Error('BOT_TOKEN не задан в переменных окружения (.env)');
-}
+const isDev = config.NODE_ENV === 'development';
 
-const bot = new Bot<DialogContext>(token);
+// Настраиваем прокси-агент для разработки, если он задан в конфиге
+const clientConfig = isDev && config.HTTPS_PROXY
+  ? {
+    client: {
+      baseFetchConfig: {
+        agent: new HttpsProxyAgent(config.HTTPS_PROXY, { keepAlive: false }),
+      },
+    },
+  }
+  : {};
+
+// Инициализируем бота с переданными настройками клиента
+const bot = new Bot<DialogContext>(config.BOT_TOKEN, clientConfig);
+
+if (isDev && config.HTTPS_PROXY) {
+  console.log('🌐 Режим разработки, прокси для Telegram:', config.HTTPS_PROXY);
+}
 
 // 1. Подключаем хранилище сессий grammY (необходимо для работы стейта)
 bot.use(
@@ -18,7 +32,7 @@ bot.use(
 
 const manager = new DialogManager(bot);
 
-// 2. Подключаем middleware диалогов для автоматического перехвата кликов по кнопкам
+// 2. Подключаем middleware диалогов для автоматического перехвата кликов по инлайн-кнопкам
 bot.use(manager.middleware());
 
 // --- Окно 1: Приветствие ---
@@ -57,9 +71,8 @@ manager.register({
   },
   actions: {
     set_name: async (ctx, manager) => {
-      // Сохраняем данные в объект сессии диалога
       ctx.session.data.name = 'Алексей';
-      await manager.show(ctx); // Перерисовываем текущее окно с обновленными данными
+      await manager.show(ctx); // Перерисовываем окно с обновленными данными
     },
     to_summary: async (ctx, manager) => {
       await manager.goTo(ctx, 'summary');
