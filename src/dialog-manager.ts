@@ -8,6 +8,15 @@ export interface DialogSession {
 
 export type DialogContext = Context & { session: DialogSession };
 
+export type WindowInputHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
+
+export interface WindowConfig {
+  id: string;
+  render: (ctx: DialogContext) => Promise<WindowRenderResult> | WindowRenderResult;
+  actions?: Record<string, WindowActionHandler>;
+  onInput?: WindowInputHandler; // Обработчик текстового ввода для окна
+}
+
 export type WindowRenderResult = {
   text: string;
   keyboard: InlineKeyboard;
@@ -97,37 +106,47 @@ export class DialogManager {
    */
   middleware() {
     return async (ctx: DialogContext, next: () => Promise<void>): Promise<void> => {
-      if (!ctx.callbackQuery || !ctx.callbackQuery.data) {
-        return next();
-      }
-
       const windowId = ctx.session.currentWindow;
       if (!windowId) {
-        await ctx.answerCallbackQuery().catch(() => { });
         return next();
       }
 
       const window = this.windows.get(windowId);
-      if (!window || !window.actions) {
-        await ctx.answerCallbackQuery().catch(() => { });
+      if (!window) {
         return next();
       }
 
-      const actionKey = ctx.callbackQuery.data;
-      const actionHandler = window.actions[actionKey];
+      // 1. Обработка нажатий на инлайн-кнопки
+      if (ctx.callbackQuery && ctx.callbackQuery.data) {
+        const actionKey = ctx.callbackQuery.data;
+        const actionHandler = window.actions?.[actionKey];
 
-      if (!actionHandler) {
-        await ctx.answerCallbackQuery({ text: 'Действие недоступно' }).catch(() => { });
-        return next();
-      }
-
-      try {
-        await actionHandler(ctx, this);
-      } finally {
-        if (!ctx.callbackQuery.inline_message_id) {
-          await ctx.answerCallbackQuery().catch(() => { });
+        if (!actionHandler) {
+          await ctx.answerCallbackQuery({ text: 'Действие недоступно' }).catch(() => { });
+          return next();
         }
+
+        try {
+          await actionHandler(ctx, this);
+        } finally {
+          if (!ctx.callbackQuery.inline_message_id) {
+            await ctx.answerCallbackQuery().catch(() => { });
+          }
+        }
+        return;
       }
+
+      // 2. Обработка обычного текстового ввода от пользователя
+      if (ctx.message && ctx.message.text && window.onInput) {
+        // Пытаемся удалить сообщение пользователя, чтобы чат оставался чистым
+        await ctx.deleteMessage().catch(() => { });
+
+        // Вызываем обработчик ввода текущего окна
+        await window.onInput(ctx, this);
+        return;
+      }
+
+      return next();
     };
   }
 }
