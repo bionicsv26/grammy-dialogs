@@ -52,31 +52,27 @@ manager.register({
   },
 });
 
-// --- Окно 2: Сбор данных ---
+// --- Окно с вводом текста ---
 manager.register({
   id: 'ask_name',
   render: async (ctx) => {
     const currentName = ctx.session.data.name || 'еще не указано';
-    const keyboard = new InlineKeyboard()
-      .text('✍️ Указать имя ("Алексей")', 'set_name')
-      .row()
-      .text('➡️ Далее к финалу', 'to_summary')
-      .row()
-      .text('🔙 Назад', 'welcome');
+    const keyboard = new InlineKeyboard().text('🔙 Назад', 'welcome');
 
     return {
-      text: `*Шаг 1: Ввод данных*\n\nТекущее имя в сессии: *${currentName}*\n\nНажмите кнопку ниже, чтобы сымулировать сохранение данных.`,
+      text: `*Шаг 1: Введите ваше имя*\n\nТекущее значение: *${currentName}*\n\n_Просто отправьте текст следующим сообщением в чат._`,
       keyboard,
     };
   },
+  // Обрабатываем текст, который пользователь написал в чат
+  onInput: async (ctx, manager) => {
+    const text = ctx.message?.text?.trim();
+    if (text) {
+      ctx.session.data.name = text; // Сохраняем имя в сессию
+      await manager.goTo(ctx, 'summary'); // Переходим к финалу
+    }
+  },
   actions: {
-    set_name: async (ctx, manager) => {
-      ctx.session.data.name = 'Алексей';
-      await manager.show(ctx); // Перерисовываем окно с обновленными данными
-    },
-    to_summary: async (ctx, manager) => {
-      await manager.goTo(ctx, 'summary');
-    },
     welcome: async (ctx, manager) => {
       await manager.goTo(ctx, 'welcome');
     },
