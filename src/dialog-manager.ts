@@ -1,4 +1,5 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
+import { z } from 'zod';
 
 export interface DialogSession {
   currentWindow?: string;
@@ -8,45 +9,32 @@ export interface DialogSession {
 
 export type DialogContext = Context & { session: DialogSession };
 
-export type WindowInputHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
-
-export interface WindowConfig {
-  id: string;
-  render: (ctx: DialogContext) => Promise<WindowRenderResult> | WindowRenderResult;
-  actions?: Record<string, WindowActionHandler>;
-  onInput?: WindowInputHandler; // Обработчик текстового ввода для окна
-}
-
 export type WindowRenderResult = {
   text: string;
   keyboard: InlineKeyboard;
 };
 
 export type WindowActionHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
+export type WindowInputHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
 
 export interface WindowConfig {
   id: string;
   render: (ctx: DialogContext) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler>;
+  onInput?: WindowInputHandler;
+  inputSchema?: z.ZodType;
 }
 
 export class DialogManager {
   private windows = new Map<string, WindowConfig>();
 
-  // Принимаем бота в конструкторе
   constructor(private bot: Bot<DialogContext>) { }
 
-  /**
-   * Регистрация нового окна в системе диалогов
-   */
   register(window: WindowConfig): this {
     this.windows.set(window.id, window);
     return this;
   }
 
-  /**
-   * Запуск диалога с указанного окна
-   */
   async start(ctx: DialogContext, windowId: string, initialData: Record<string, any> = {}): Promise<void> {
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
@@ -57,9 +45,6 @@ export class DialogManager {
     await this.show(ctx);
   }
 
-  /**
-   * Переход на другое окно внутри текущего диалога
-   */
   async goTo(ctx: DialogContext, windowId: string): Promise<void> {
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
@@ -68,9 +53,6 @@ export class DialogManager {
     await this.show(ctx);
   }
 
-  /**
-   * Отрисовка текущего окна (редактирование существующего сообщения или отправка нового)
-   */
   async show(ctx: DialogContext): Promise<void> {
     const windowId = ctx.session.currentWindow;
     if (!windowId) return;
@@ -101,9 +83,6 @@ export class DialogManager {
     }
   }
 
-  /**
-   * Middleware для автоматического перехвата нажатий инлайн-кнопок
-   */
   middleware() {
     return async (ctx: DialogContext, next: () => Promise<void>): Promise<void> => {
       const windowId = ctx.session.currentWindow;
@@ -136,13 +115,32 @@ export class DialogManager {
         return;
       }
 
-      // 2. Обработка обычного текстового ввода от пользователя
-      if (ctx.message && ctx.message.text && window.onInput) {
-        // Пытаемся удалить сообщение пользователя, чтобы чат оставался чистым
+      // 2. Обработка обычного текстового ввода с валидацией через Zod
+      if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput)) {
         await ctx.deleteMessage().catch(() => { });
 
-        // Вызываем обработчик ввода текущего окна
-        await window.onInput(ctx, this);
+        const textInput = ctx.message.text.trim();
+
+        // Если задана схема Zod, проверяем ввод
+        if (window.inputSchema) {
+          const parseResult = window.inputSchema.safeParse(textInput);
+
+          if (!parseResult.success) {
+            // Берем первое сообщение об ошибке из Zod
+            const firstError = parseResult.error.issues[0]?.message || 'Неверный формат данных';
+            ctx.session.data.error = firstError;
+            await this.show(ctx); // Перерисовываем окно с ошибкой
+            return;
+          }
+
+          // Сохраняем успешно спарсенный/провалидированный результат
+          ctx.session.data.validatedInput = parseResult.data;
+        }
+
+        // Вызываем кастомный обработчик ввода, если он есть
+        if (window.onInput) {
+          await window.onInput(ctx, this);
+        }
         return;
       }
 
