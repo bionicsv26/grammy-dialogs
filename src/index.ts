@@ -2,6 +2,7 @@ import { Bot, session, InlineKeyboard } from 'grammy';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { config } from './config.js';
 import { DialogManager, type DialogContext } from './dialog-manager.js';
+import { z } from 'zod';
 
 const isDev = config.NODE_ENV === 'development';
 
@@ -52,28 +53,40 @@ manager.register({
   },
 });
 
-// --- Окно с вводом текста ---
+// --- Окно с вводом текста и валидацией через Zod ---
 manager.register({
   id: 'ask_name',
   render: async (ctx) => {
-    const currentName = ctx.session.data.name || 'еще не указано';
+    const error = ctx.session.data.error;
+    delete ctx.session.data.error; // Очищаем ошибку после показа
+
     const keyboard = new InlineKeyboard().text('🔙 Назад', 'welcome');
 
-    return {
-      text: `*Шаг 1: Введите ваше имя*\n\nТекущее значение: *${currentName}*\n\n_Просто отправьте текст следующим сообщением в чат._`,
-      keyboard,
-    };
-  },
-  // Обрабатываем текст, который пользователь написал в чат
-  onInput: async (ctx, manager) => {
-    const text = ctx.message?.text?.trim();
-    if (text) {
-      ctx.session.data.name = text; // Сохраняем имя в сессию
-      await manager.goTo(ctx, 'summary'); // Переходим к финалу
+    let text = '*Шаг 1: Введите ваше имя*\n\n_Имя должно содержать от 2 до 30 символов и состоять только из букв._';
+
+    if (error) {
+      text = `❌ *${error}*\n\n` + text;
     }
+
+    return { text, keyboard };
+  },
+  // Декларативная валидация через Zod прямо в конфиге окна
+  inputSchema: z
+    .string()
+    .min(2, 'Имя слишком короткое (минимум 2 символа)')
+    .max(50, 'Имя слишком длинное (максимум 50 символов)')
+    .regex(/^[А-Яа-яA-Za-z\s\-]+$/, 'Имя может содержать только буквы, пробелы и дефисы'),
+
+  onInput: async (ctx, manager) => {
+    // В validatedInput уже лежит проверенный и очищенный результат от Zod
+    ctx.session.data.name = ctx.session.data.validatedInput;
+    delete ctx.session.data.validatedInput;
+
+    await manager.goTo(ctx, 'summary');
   },
   actions: {
     welcome: async (ctx, manager) => {
+      delete ctx.session.data.error;
       await manager.goTo(ctx, 'welcome');
     },
   },
