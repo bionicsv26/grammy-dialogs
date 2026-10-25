@@ -10,7 +10,7 @@ const clientConfig = isDev && config.HTTPS_PROXY
   ? {
     client: {
       baseFetchConfig: {
-        agent: new HttpsProxyAgent(config.HTTPS_PROXY, { keepAlive: false }),
+        agent: new HttpsProxyAgent(config.HTTPS_PROXY, { keepAlive: true }),
       },
     },
   }
