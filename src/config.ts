@@ -6,8 +6,8 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   BOT_TOKEN: z.string().min(1, 'Токен Telegram обязателен'),
-  // Задаем дефолтный прокси для локальной разработки, чтобы не вызывать ошибку undefined
   HTTPS_PROXY: z.url('HTTPS_PROXY должен быть валидным URL').default('http://127.0.0.1:3067'),
+  REDIS_URL: z.url().default('redis://127.0.0.1:6379'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
