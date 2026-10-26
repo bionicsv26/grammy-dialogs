@@ -7,7 +7,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   BOT_TOKEN: z.string().min(1, 'Токен Telegram обязателен'),
   HTTPS_PROXY: z.url('HTTPS_PROXY должен быть валидным URL').default('http://127.0.0.1:3067'),
-  REDIS_URL: z.url().default('redis://127.0.0.1:6379'),
+  REDIS_HOST: z.string().default('localhost'),
+  REDIS_PORT: z.coerce.number().default(6379),
+  REDIS_PASSWORD: z.string().min(1, 'Пароль Redis обязателен'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

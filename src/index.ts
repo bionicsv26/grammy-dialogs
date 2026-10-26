@@ -1,3 +1,4 @@
+// src/index.ts
 import { Bot, session } from 'grammy';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { Redis } from 'ioredis';
@@ -19,29 +20,31 @@ const clientConfig = isDev && config.HTTPS_PROXY
 
 const bot = new Bot<DialogContext>(config.BOT_TOKEN, clientConfig);
 
-// ✅ Инициализируем клиент Redis и адаптер хранилища grammY
-const redisClient = new Redis(config.REDIS_URL);
+const redisClient = new Redis({
+  host: config.REDIS_HOST,
+  port: config.REDIS_PORT,
+  password: config.REDIS_PASSWORD,
+});
+
 const storage = new RedisAdapter({
   instance: redisClient,
 });
 
-// Подключаем сессии с использованием Redis-хранилища
 bot.use(
   session({
     initial: (): DialogContext['session'] => ({ data: {} }),
-    storage, // Сессии теперь сохраняются в Redis!
+    storage,
   })
 );
 
 const manager = new DialogManager(bot);
 bot.use(manager.middleware());
 
-// Регистрируем модуль анкеты
 registerQuestionnaireModule(manager);
 
 bot.command('start', async (ctx) => {
   await manager.start(ctx, 'welcome');
 });
 
-console.log('Бот запущен с хранением сессий в Redis...');
+console.log('Бот успешно запущен и подключен к Redis с авторизацией!');
 bot.start();
