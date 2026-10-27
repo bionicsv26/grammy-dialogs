@@ -2,7 +2,6 @@ import { InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 import { DialogManager } from '../dialog-manager.js';
 
-// 1. Добавляем "as const", чтобы TypeScript фиксировал точные строковые литералы
 const AVAILABLE_INTERESTS = [
   { id: 'ts', label: 'TypeScript' },
   { id: 'node', label: 'Node.js' },
@@ -10,13 +9,11 @@ const AVAILABLE_INTERESTS = [
   { id: 'vue', label: 'Vue 3' },
 ] as const;
 
-// 2. Автоматически извлекаем массив ID из структуры и приводим к типу кортежа для z.enum
 const interestIds = AVAILABLE_INTERESTS.map((item) => item.id) as [
   (typeof AVAILABLE_INTERESTS)[number]['id'],
   ...(typeof AVAILABLE_INTERESTS)[number]['id'][]
 ];
 
-// 3. Динамическая Zod-схема
 const interestsSchema = z
   .array(z.enum(interestIds))
   .min(1, 'Выберите хотя бы одну технологию')
@@ -40,14 +37,19 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     },
   });
 
-  // 2. Окно ввода имени с валидацией Zod
+  // 2. Окно ввода имени
   manager.register({
     id: 'ask_name',
     render: async (ctx) => {
       const error = ctx.session.data.error;
       delete ctx.session.data.error;
 
-      const keyboard = new InlineKeyboard().text('🔙 Назад', 'welcome');
+      // 🔍 Проверяем, редактирует ли пользователь данные из summary
+      const isEditing = ctx.session.data.returnTo === 'summary';
+      const backAction = isEditing ? 'cancel_edit_name' : 'welcome';
+      const backLabel = isEditing ? '🔙 Отмена' : '🔙 Назад';
+
+      const keyboard = new InlineKeyboard().text(backLabel, backAction);
 
       let text = '*Шаг 1: Введите ваше имя*\n\n_Имя должно содержать от 2 до 50 символов._';
       if (error) {
@@ -63,17 +65,27 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     onInput: async (ctx, manager) => {
       ctx.session.data.name = ctx.session.data.validatedInput;
       delete ctx.session.data.validatedInput;
-      await manager.goTo(ctx, 'ask_interests');
+
+      // 🔄 Проверяем, куда нужно вернуться после ввода
+      const returnTo = ctx.session.data.returnTo;
+      delete ctx.session.data.returnTo;
+
+      await manager.goTo(ctx, returnTo || 'ask_interests');
     },
     actions: {
       welcome: async (ctx, manager) => {
         delete ctx.session.data.error;
         await manager.goTo(ctx, 'welcome');
       },
+      cancel_edit_name: async (ctx, manager) => {
+        delete ctx.session.data.returnTo;
+        delete ctx.session.data.error;
+        await manager.goTo(ctx, 'summary');
+      },
     },
   });
 
-  // 3. Окно с выбором нескольких вариантов (чекбоксы)
+  // 3. Окно с выбором технологий (чекбоксы)
   manager.register({
     id: 'ask_interests',
     render: async (ctx) => {
@@ -81,6 +93,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         ctx.session.data.interests = [];
       }
       const selected: string[] = ctx.session.data.interests;
+      const isEditing = ctx.session.data.returnTo === 'summary';
 
       const keyboard = new InlineKeyboard();
 
@@ -90,11 +103,15 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         keyboard.text(`${icon} ${item.label}`, `toggle_${item.id}`).row();
       });
 
-      keyboard.text('➡️ Подтвердить', 'confirm_interests').row();
-      keyboard.text('🔙 Назад', 'ask_name');
+      const confirmLabel = isEditing ? '💾 Сохранить изменения' : '➡️ Подтвердить';
+      const backAction = isEditing ? 'cancel_edit_interests' : 'ask_name';
+      const backLabel = isEditing ? '🔙 Назад к предпросмотру' : '🔙 Назад';
+
+      keyboard.text(confirmLabel, 'confirm_interests').row();
+      keyboard.text(backLabel, backAction);
 
       return {
-        text: '*Шаг 2: Выберите интересные вам технологии*\n\n_Отметьте от 1 до 3 вариантов и нажмите «Подтвердить»._',
+        text: '*Шаг 2: Выберите интересные вам технологии*\n\n_Отметьте от 1 до 4 вариантов._',
         keyboard,
       };
     },
@@ -132,10 +149,17 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
           return;
         }
 
-        await manager.goTo(ctx, 'summary');
+        const returnTo = ctx.session.data.returnTo;
+        delete ctx.session.data.returnTo;
+
+        await manager.goTo(ctx, returnTo || 'summary');
       },
       ask_name: async (ctx, manager) => {
         await manager.goTo(ctx, 'ask_name');
+      },
+      cancel_edit_interests: async (ctx, manager) => {
+        delete ctx.session.data.returnTo;
+        await manager.goTo(ctx, 'summary');
       },
     },
   });
@@ -159,38 +183,39 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         .text('🔄 Начать заново', 'restart');
 
       return {
-        text: `📋 *Предпросмотр анкеты*\n\nПожалуйста, проверьте правильность данных:\n\n👤 *Имя:* ${name}\n💻 *Технологии:* ${interestLabels || 'Не выбрано'}`,
+        text: `📋 *Предпросмотр анкеты*\n\nПроверьте данные:\n\n👤 *Имя:* ${name}\n💻 *Технологии:* ${interestLabels || 'Не выбрано'}`,
         keyboard,
       };
     },
     actions: {
-      // 🔙 Прыжок на шаг изменения имени
+      // 🎯 Устанавливаем флаг возврата перед переходом на шаг
       edit_name: async (ctx, manager) => {
+        ctx.session.data.returnTo = 'summary';
         await manager.goTo(ctx, 'ask_name');
       },
-      // 🔙 Прыжок на шаг изменения технологий
       edit_interests: async (ctx, manager) => {
+        ctx.session.data.returnTo = 'summary';
         await manager.goTo(ctx, 'ask_interests');
       },
-      // ✅ Окончательное подтверждение анкеты
       confirm_all: async (ctx, manager) => {
         await manager.goTo(ctx, 'completed');
       },
       restart: async (ctx, manager) => {
         delete ctx.session.data.interests;
         delete ctx.session.data.name;
+        delete ctx.session.data.returnTo;
         await manager.start(ctx, 'welcome');
       },
     },
   });
 
-  // 5. 🆕 Финальное успешное окно после подтверждения
+  // 5. Финальное окно
   manager.register({
     id: 'completed',
     render: async (ctx) => {
       const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
       return {
-        text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*\n\nМы свяжемся с вами в ближайшее время.',
+        text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*',
         keyboard,
       };
     },
@@ -198,6 +223,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       restart: async (ctx, manager) => {
         delete ctx.session.data.interests;
         delete ctx.session.data.name;
+        delete ctx.session.data.returnTo;
         await manager.start(ctx, 'welcome');
       },
     },
