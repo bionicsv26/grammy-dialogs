@@ -140,7 +140,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     },
   });
 
-  // 4. Финальное окно
+  // 4. Окно предпросмотра (Summary)
   manager.register({
     id: 'summary',
     render: async (ctx) => {
@@ -152,10 +152,45 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         .filter(Boolean)
         .join(', ');
 
-      const keyboard = new InlineKeyboard().text('🔄 Начать заново', 'restart');
+      const keyboard = new InlineKeyboard()
+        .text('✏️ Изменить имя', 'edit_name').row()
+        .text('✏️ Изменить технологии', 'edit_interests').row()
+        .text('✅ Всё верно, подтвердить', 'confirm_all').row()
+        .text('🔄 Начать заново', 'restart');
 
       return {
-        text: `✅ *Анкета успешно завершена!*\n\nСобранные данные:\n- Имя: ${name}\n- Технологии: ${interestLabels || 'Не выбрано'}`,
+        text: `📋 *Предпросмотр анкеты*\n\nПожалуйста, проверьте правильность данных:\n\n👤 *Имя:* ${name}\n💻 *Технологии:* ${interestLabels || 'Не выбрано'}`,
+        keyboard,
+      };
+    },
+    actions: {
+      // 🔙 Прыжок на шаг изменения имени
+      edit_name: async (ctx, manager) => {
+        await manager.goTo(ctx, 'ask_name');
+      },
+      // 🔙 Прыжок на шаг изменения технологий
+      edit_interests: async (ctx, manager) => {
+        await manager.goTo(ctx, 'ask_interests');
+      },
+      // ✅ Окончательное подтверждение анкеты
+      confirm_all: async (ctx, manager) => {
+        await manager.goTo(ctx, 'completed');
+      },
+      restart: async (ctx, manager) => {
+        delete ctx.session.data.interests;
+        delete ctx.session.data.name;
+        await manager.start(ctx, 'welcome');
+      },
+    },
+  });
+
+  // 5. 🆕 Финальное успешное окно после подтверждения
+  manager.register({
+    id: 'completed',
+    render: async (ctx) => {
+      const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
+      return {
+        text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*\n\nМы свяжемся с вами в ближайшее время.',
         keyboard,
       };
     },
