@@ -65,6 +65,18 @@ bot.use(manager.middleware());
 registerQuestionnaireModule(manager);
 
 bot.command('start', async (ctx) => {
+  // Проверяем, находится ли пользователь в процессе заполнения (например, есть имя или активное окно)
+  const isProfileInProgress = ctx.session.data.name || ctx.session.data.currentWindow;
+
+  if (isProfileInProgress && ctx.session.data.currentWindow !== 'welcome' && ctx.session.data.currentWindow !== 'completed') {
+    // Сохраняем текущее окно, чтобы можно было вернуться
+    ctx.session.data.previousWindow = ctx.session.data.currentWindow || 'ask_name';
+    await manager.start(ctx, 'confirm_restart');
+    return;
+  }
+
+  // Если анкета еще не начиналась или уже завершена — просто запускаем с нуля
+  ctx.session.data = {};
   await manager.start(ctx, 'welcome');
 });
 

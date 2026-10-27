@@ -228,4 +228,32 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       },
     },
   });
+
+  // 🆕 Окно подтверждения сброса при отправке /start
+  manager.register({
+    id: 'confirm_restart',
+    render: async (ctx) => {
+      const keyboard = new InlineKeyboard()
+        .text('⚠️ Да, сбросить и начать заново', 'do_restart')
+        .row()
+        .text('🔙 Продолжить заполнение', 'cancel_restart');
+
+      return {
+        text: '⚠️ *У вас есть незавершенная анкета!*\n\nЕсли вы начнете заново, все введенные данные будут потеряны. Вы уверены?',
+        keyboard,
+      };
+    },
+    actions: {
+      do_restart: async (ctx, manager) => {
+        // Полностью очищаем данные сессии и запускаем приветствие
+        ctx.session.data = {};
+        await manager.start(ctx, 'welcome');
+      },
+      cancel_restart: async (ctx, manager) => {
+        // Пытаемся вернуть пользователя туда, где он был, или на summary
+        const prevWindow = ctx.session.data.previousWindow || 'summary';
+        await manager.goTo(ctx, prevWindow);
+      },
+    },
+  });
 }
