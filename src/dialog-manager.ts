@@ -5,6 +5,7 @@ export interface DialogSession {
   currentWindow?: string;
   data: Record<string, any>;
   messageId?: number;
+  [key: string]: any;
 }
 
 export type DialogContext = Context & { session: DialogSession };
@@ -121,23 +122,19 @@ export class DialogManager {
 
         const textInput = ctx.message.text.trim();
 
-        // Если задана схема Zod, проверяем ввод
         if (window.inputSchema) {
           const parseResult = window.inputSchema.safeParse(textInput);
 
           if (!parseResult.success) {
-            // Берем первое сообщение об ошибке из Zod
             const firstError = parseResult.error.issues[0]?.message || 'Неверный формат данных';
             ctx.session.data.error = firstError;
-            await this.show(ctx); // Перерисовываем окно с ошибкой
+            await this.show(ctx);
             return;
           }
 
-          // Сохраняем успешно спарсенный/провалидированный результат
           ctx.session.data.validatedInput = parseResult.data;
         }
 
-        // Вызываем кастомный обработчик ввода, если он есть
         if (window.onInput) {
           await window.onInput(ctx, this);
         }
