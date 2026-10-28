@@ -213,13 +213,20 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
   manager.register({
     id: 'completed',
     render: async (ctx) => {
-      const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
+      const keyboard = new InlineKeyboard()
+        .text('✅ Выбрать цепочку ветвления', 'proceed_to_branches')
+        .row()
+        .text('🔄 Заполнить заново', 'restart');
       return {
         text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*',
         keyboard,
       };
     },
     actions: {
+      proceed_to_branches: async (ctx, manager) => {
+        // 🚀 Плавный переход в меню ветвления после успешного прохождения первой цепочки!
+        await manager.goTo(ctx, 'select_branch');
+      },
       restart: async (ctx, manager) => {
         delete ctx.session.data.interests;
         delete ctx.session.data.name;

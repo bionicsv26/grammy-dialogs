@@ -6,6 +6,7 @@ import { RedisAdapter } from '@grammyjs/storage-redis';
 import { config } from './config.js';
 import { DialogManager, type DialogContext } from './dialog-manager.js';
 import { registerQuestionnaireModule } from './modules/questionnaire.dialog.js';
+import { registerBranchingModule } from './modules/branching.dialog.js'
 import { logger } from './logger.js';
 
 const isDev = config.NODE_ENV === 'development';
@@ -93,6 +94,7 @@ bot.use(manager.middleware());
 
 // Регистрация модулей диалога
 registerQuestionnaireModule(manager);
+registerBranchingModule(manager);
 
 // Перехват команды /start с защитой от случайного сброса
 bot.command('start', async (ctx) => {
