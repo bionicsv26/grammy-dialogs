@@ -1,26 +1,13 @@
 import { InlineKeyboard } from 'grammy';
-import { z } from 'zod';
 import { DialogManager } from '../dialog-manager.js';
-
-const AVAILABLE_INTERESTS = [
-  { id: 'ts', label: 'TypeScript' },
-  { id: 'node', label: 'Node.js' },
-  { id: 'redis', label: 'Redis' },
-  { id: 'vue', label: 'Vue 3' },
-] as const;
-
-const interestIds = AVAILABLE_INTERESTS.map((item) => item.id) as [
-  (typeof AVAILABLE_INTERESTS)[number]['id'],
-  ...(typeof AVAILABLE_INTERESTS)[number]['id'][]
-];
-
-const interestsSchema = z
-  .array(z.enum(interestIds))
-  .min(1, 'Выберите хотя бы одну технологию')
-  .max(4, 'Можно выбрать максимум 4 технологии');
+import {
+  AVAILABLE_INTERESTS,
+  nameSchema,
+  interestsSchema
+} from '../schemas/questionnaire.schema.js';
 
 export function registerQuestionnaireModule(manager: DialogManager): void {
-  // 1. Окно приветствия
+  // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
     render: async (ctx) => {
@@ -50,7 +37,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       const error = ctx.session.data.error;
       delete ctx.session.data.error;
 
-      // 🔍 Проверяем, редактирует ли пользователь данные из summary
       const isEditing = ctx.session.data.returnTo === 'summary';
       const backAction = isEditing ? 'cancel_edit_name' : 'main_menu';
       const backLabel = isEditing ? '🔙 Отмена' : '🔙 Назад';
@@ -64,15 +50,11 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
 
       return { text, keyboard };
     },
-    inputSchema: z
-      .string()
-      .min(2, 'Имя слишком короткое (минимум 2 символа)')
-      .max(50, 'Имя слишком длинное (максимум 50 символов)'),
+    inputSchema: nameSchema,
     onInput: async (ctx, manager) => {
       ctx.session.data.name = ctx.session.data.validatedInput;
       delete ctx.session.data.validatedInput;
 
-      // 🔄 Проверяем, куда нужно вернуться после ввода
       const returnTo = ctx.session.data.returnTo;
       delete ctx.session.data.returnTo;
 
@@ -194,7 +176,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       };
     },
     actions: {
-      // 🎯 Устанавливаем флаг возврата перед переходом на шаг
       edit_name: async (ctx, manager) => {
         ctx.session.data.returnTo = 'summary';
         await manager.goTo(ctx, 'ask_name');
@@ -236,7 +217,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     },
   });
 
-  // 🆕 Окно подтверждения сброса при отправке /start
+  // Окно подтверждения сброса при отправке /start
   manager.register({
     id: 'confirm_restart',
     render: async (ctx) => {
@@ -254,12 +235,10 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     },
     actions: {
       do_restart: async (ctx, manager) => {
-        // Полностью очищаем данные сессии и запускаем приветствие
         ctx.session.data = {};
         await manager.start(ctx, 'main_menu');
       },
       cancel_restart: async (ctx, manager) => {
-        // Пытаемся вернуть пользователя туда, где он был, или на summary
         const prevWindow = ctx.session.data.previousWindow || 'summary';
         await manager.goTo(ctx, prevWindow);
       },
