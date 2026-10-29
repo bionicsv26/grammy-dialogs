@@ -22,9 +22,12 @@ const interestsSchema = z
 export function registerQuestionnaireModule(manager: DialogManager): void {
   // 1. Окно приветствия
   manager.register({
-    id: 'welcome',
+    id: 'main_menu',
     render: async (ctx) => {
-      const keyboard = new InlineKeyboard().text('▶️ Начать анкету', 'to_form');
+      const keyboard = new InlineKeyboard()
+        .text('▶️ Начать анкету', 'to_form')
+        .row()
+        .text('🔀 Выбор направления', 'proceed_to_branches');
       return {
         text: '*Добро пожаловать!*\n\nЭто демонстрация мини-библиотеки диалогов на TypeScript и grammY.',
         keyboard,
@@ -33,6 +36,9 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     actions: {
       to_form: async (ctx, manager) => {
         await manager.goTo(ctx, 'ask_name');
+      },
+      proceed_to_branches: async (ctx, manager) => {
+        await manager.goTo(ctx, 'select_branch');
       },
     },
   });
@@ -46,7 +52,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
 
       // 🔍 Проверяем, редактирует ли пользователь данные из summary
       const isEditing = ctx.session.data.returnTo === 'summary';
-      const backAction = isEditing ? 'cancel_edit_name' : 'welcome';
+      const backAction = isEditing ? 'cancel_edit_name' : 'main_menu';
       const backLabel = isEditing ? '🔙 Отмена' : '🔙 Назад';
 
       const keyboard = new InlineKeyboard().text(backLabel, backAction);
@@ -73,9 +79,9 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       await manager.goTo(ctx, returnTo || 'ask_interests');
     },
     actions: {
-      welcome: async (ctx, manager) => {
+      main_menu: async (ctx, manager) => {
         delete ctx.session.data.error;
-        await manager.goTo(ctx, 'welcome');
+        await manager.goTo(ctx, 'main_menu');
       },
       cancel_edit_name: async (ctx, manager) => {
         delete ctx.session.data.returnTo;
@@ -204,7 +210,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         delete ctx.session.data.interests;
         delete ctx.session.data.name;
         delete ctx.session.data.returnTo;
-        await manager.start(ctx, 'welcome');
+        await manager.start(ctx, 'main_menu');
       },
     },
   });
@@ -214,8 +220,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
     id: 'completed',
     render: async (ctx) => {
       const keyboard = new InlineKeyboard()
-        .text('✅ Выбрать цепочку ветвления', 'proceed_to_branches')
-        .row()
         .text('🔄 Заполнить заново', 'restart');
       return {
         text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*',
@@ -223,15 +227,11 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       };
     },
     actions: {
-      proceed_to_branches: async (ctx, manager) => {
-        // 🚀 Плавный переход в меню ветвления после успешного прохождения первой цепочки!
-        await manager.goTo(ctx, 'select_branch');
-      },
       restart: async (ctx, manager) => {
         delete ctx.session.data.interests;
         delete ctx.session.data.name;
         delete ctx.session.data.returnTo;
-        await manager.start(ctx, 'welcome');
+        await manager.start(ctx, 'main_menu');
       },
     },
   });
@@ -243,7 +243,9 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       const keyboard = new InlineKeyboard()
         .text('⚠️ Да, сбросить и начать заново', 'do_restart')
         .row()
-        .text('🔙 Продолжить заполнение', 'cancel_restart');
+        .text('🔙 Продолжить заполнение', 'cancel_restart')
+        .row()
+        .text('🏠 В главное меню', 'global_back_to_menu');
 
       return {
         text: '⚠️ *У вас есть незавершенная анкета!*\n\nЕсли вы начнете заново, все введенные данные будут потеряны. Вы уверены?',
@@ -254,7 +256,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       do_restart: async (ctx, manager) => {
         // Полностью очищаем данные сессии и запускаем приветствие
         ctx.session.data = {};
-        await manager.start(ctx, 'welcome');
+        await manager.start(ctx, 'main_menu');
       },
       cancel_restart: async (ctx, manager) => {
         // Пытаемся вернуть пользователя туда, где он был, или на summary

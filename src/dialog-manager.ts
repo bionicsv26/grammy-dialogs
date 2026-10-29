@@ -99,6 +99,19 @@ export class DialogManager {
       // 1. Обработка нажатий на инлайн-кнопки
       if (ctx.callbackQuery && ctx.callbackQuery.data) {
         const actionKey = ctx.callbackQuery.data;
+
+        // 🌐 УНИВЕРСАЛЬНЫЙ ПЕРЕХВАТЧИК: Возврат в главное меню из любой точки
+        if (actionKey === 'global_back_to_menu') {
+          try {
+            await this.goTo(ctx, 'main_menu'); // Укажите id вашего главного меню
+          } finally {
+            if (!ctx.callbackQuery.inline_message_id) {
+              await ctx.answerCallbackQuery().catch(() => { });
+            }
+          }
+          return;
+        }
+
         const actionHandler = window.actions?.[actionKey];
 
         if (!actionHandler) {

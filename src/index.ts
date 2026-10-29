@@ -103,7 +103,7 @@ bot.command('start', async (ctx) => {
 
   if (
     isProfileInProgress &&
-    ctx.session.currentWindow !== 'welcome' &&
+    ctx.session.currentWindow !== 'main_menu' &&
     ctx.session.currentWindow !== 'completed'
   ) {
     ctx.session.data.previousWindow = ctx.session.currentWindow || 'ask_name';
@@ -112,7 +112,7 @@ bot.command('start', async (ctx) => {
   }
 
   ctx.session.data = {};
-  await manager.start(ctx, 'welcome');
+  await manager.start(ctx, 'main_menu');
 });
 
 // Глобальный обработчик ошибок

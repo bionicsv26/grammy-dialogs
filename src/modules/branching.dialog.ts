@@ -41,6 +41,9 @@ export function registerBranchingModule(manager: DialogManager): void {
     render: async () => {
       const keyboard = new InlineKeyboard()
         .text('⬅️ Назад к выбору', 'back_to_menu')
+        .row()
+        .text('🏠 В главное меню', 'global_back_to_menu')
+        .row()
         .text('✅ Завершить', 'finish_flow');
 
       return {
@@ -64,6 +67,9 @@ export function registerBranchingModule(manager: DialogManager): void {
     render: async () => {
       const keyboard = new InlineKeyboard()
         .text('⬅️ Назад к выбору', 'back_to_menu')
+        .row()
+        .text('🏠 В главное меню', 'global_back_to_menu')
+        .row()
         .text('✅ Завершить', 'finish_flow');
 
       return {
@@ -87,6 +93,9 @@ export function registerBranchingModule(manager: DialogManager): void {
     render: async () => {
       const keyboard = new InlineKeyboard()
         .text('⬅️ Назад к выбору', 'back_to_menu')
+        .row()
+        .text('🏠 В главное меню', 'global_back_to_menu')
+        .row()
         .text('✅ Завершить', 'finish_flow');
 
       return {
