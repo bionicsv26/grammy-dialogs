@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { validators } from './common.validators.js';
 
 export const AVAILABLE_INTERESTS = [
   { id: 'ts', label: 'TypeScript' },
@@ -12,16 +12,7 @@ const interestIds = AVAILABLE_INTERESTS.map((item) => item.id) as [
   ...(typeof AVAILABLE_INTERESTS)[number]['id'][]
 ];
 
-const nameRegex = /^[a-zA-Zа-яА-ЯёЁ\s-]+$/;
+export const nameSchema = validators.name(2, 50);
 
-export const nameSchema = z
-  .string()
-  .trim()
-  .min(2, 'Имя слишком короткое (минимум 2 символа)')
-  .max(50, 'Имя слишком длинное (максимум 50 символов)')
-  .regex(nameRegex, 'Имя может содержать только буквы, пробелы и дефисы');
-
-export const interestsSchema = z
-  .array(z.enum(interestIds))
-  .min(1, 'Выберите хотя бы одну технологию')
-  .max(4, 'Можно выбрать максимум 4 технологии');
+export const createInterestsSchema = (min = 1, max = 4) =>
+  validators.selection(interestIds, min, max);

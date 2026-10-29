@@ -3,7 +3,7 @@ import { DialogManager } from '../dialog-manager.js';
 import {
   AVAILABLE_INTERESTS,
   nameSchema,
-  interestsSchema
+  createInterestsSchema
 } from '../schemas/questionnaire.schema.js';
 
 export function registerQuestionnaireModule(manager: DialogManager): void {
@@ -126,7 +126,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
       ),
       confirm_interests: async (ctx, manager) => {
         const selected = ctx.session.data.interests || [];
-        const parseResult = interestsSchema.safeParse(selected);
+        const parseResult = createInterestsSchema(1, 4).safeParse(selected);
 
         if (!parseResult.success) {
           const errorMessage = parseResult.error.issues[0]?.message || 'Неверный выбор';
