@@ -12,10 +12,14 @@ const interestIds = AVAILABLE_INTERESTS.map((item) => item.id) as [
   ...(typeof AVAILABLE_INTERESTS)[number]['id'][]
 ];
 
+const nameRegex = /^[a-zA-Zа-яА-ЯёЁ\s-]+$/;
+
 export const nameSchema = z
   .string()
+  .trim()
   .min(2, 'Имя слишком короткое (минимум 2 символа)')
-  .max(50, 'Имя слишком длинное (максимум 50 символов)');
+  .max(50, 'Имя слишком длинное (максимум 50 символов)')
+  .regex(nameRegex, 'Имя может содержать только буквы, пробелы и дефисы');
 
 export const interestsSchema = z
   .array(z.enum(interestIds))
