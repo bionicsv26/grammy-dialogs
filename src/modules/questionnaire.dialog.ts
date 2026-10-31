@@ -1,5 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { DialogManager } from '../dialog-manager.js';
+import { config } from '../config.js';
+import { logger } from '../logger.js';
 import {
   AVAILABLE_INTERESTS,
   nameSchema,
@@ -185,6 +187,44 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
         await manager.goTo(ctx, 'ask_interests');
       },
       confirm_all: async (ctx, manager) => {
+        const adminChatId = config.ADMIN_CHAT_ID;
+
+        if (adminChatId) {
+          try {
+            const name = ctx.session.data.name || 'Аноним';
+            const interestIdsList = ctx.session.data.interests || [];
+
+            // Превращаем ID технологий в человекочитаемые метки
+            const interestLabels = interestIdsList
+              .map((id: string) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
+              .filter(Boolean)
+              .join(', ');
+
+            const userId = ctx.from?.id;
+            const username = ctx.from?.username ? `@${ctx.from.username}` : 'скрыт';
+
+            // Формируем сообщение для администратора
+            const adminMessage =
+              `🚨 *Новая заполненная анкета!*\n\n` +
+              `👤 *Имя:* ${name}\n` +
+              `🔗 *Пользователь:* ${username} (ID: \`${userId}\`)\n` +
+              `💻 *Технологии:* ${interestLabels || 'Не выбрано'}\n` +
+              `📅 *Дата:* ${new Date().toLocaleString('ru-RU')}`;
+
+            // Отправляем сообщение в админ-чат
+            await ctx.api.sendMessage(adminChatId, adminMessage, {
+              parse_mode: 'Markdown',
+            });
+
+            logger.info(`📤 Анкета успешно отправлена администратору в чат ${adminChatId}`, { userId });
+          } catch (error) {
+            logger.error(`❌ Ошибка при отправке анкеты администратору`, { error });
+          }
+        } else {
+          logger.warn(`⚠️ ADMIN_CHAT_ID не настроен в конфигурации. Уведомление не отправлено.`);
+        }
+
+        // Переходим на финальное окно благодарности
         await manager.goTo(ctx, 'completed');
       },
       restart: async (ctx, manager) => {
