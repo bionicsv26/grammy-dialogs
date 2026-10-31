@@ -10,6 +10,7 @@ const envSchema = z.object({
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().min(1, 'Пароль Redis обязателен'),
+  ADMIN_CHAT_ID: z.coerce.number().default(0),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
