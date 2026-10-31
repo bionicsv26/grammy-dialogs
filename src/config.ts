@@ -17,7 +17,7 @@ const parsedEnv = envSchema.safeParse(process.env);
 
 if (!parsedEnv.success) {
   console.error('❌ Ошибка валидации переменных окружения (.env):');
-  console.error(JSON.stringify(parsedEnv.error.format(), null, 2));
+  console.error(JSON.stringify(parsedEnv.error.issues, null, 2));
   process.exit(1);
 }
 
