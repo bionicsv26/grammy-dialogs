@@ -131,6 +131,7 @@ export class DialogManager {
 
       // 2. Обработка обычного текстового ввода с валидацией через Zod
       if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput)) {
+        // ⚡ Мгновенно удаляем сообщение пользователя из чата до валидации
         await ctx.deleteMessage().catch(() => { });
 
         const textInput = ctx.message.text.trim();
@@ -145,6 +146,8 @@ export class DialogManager {
             return;
           }
 
+          // ✅ Успешно прошли валидацию — обязательно очищаем прошлую ошибку!
+          delete ctx.session.data.error;
           ctx.session.data.validatedInput = parseResult.data;
         }
 
