@@ -8,11 +8,32 @@ import {
   createInterestsSchema
 } from '../schemas/questionnaire.schema.js';
 
-export function registerQuestionnaireModule(manager: DialogManager): void {
+// 1. Описываем структуру стейта и список всех ID окон в этом модуле
+export interface QuestionnaireState {
+  name?: string;
+  interests?: string[];
+  returnTo?: QuestionnaireWindowId;
+  previousWindow?: QuestionnaireWindowId;
+  error?: string;
+  validatedInput?: any;
+}
+
+export type QuestionnaireWindowId =
+  | 'main_menu'
+  | 'ask_name'
+  | 'ask_interests'
+  | 'summary'
+  | 'completed'
+  | 'confirm_restart'
+  | 'select_branch'; // если у вас есть это окно в другом файле или добавить сюда
+
+export function registerQuestionnaireModule(
+  manager: DialogManager<QuestionnaireState, QuestionnaireWindowId>
+): void {
   // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
-    render: async (ctx) => {
+    render: async () => {
       const keyboard = new InlineKeyboard()
         .text('▶️ Начать анкету', 'to_form')
         .row()
@@ -194,7 +215,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
             const name = ctx.session.data.name || 'Аноним';
             const interestIdsList = ctx.session.data.interests || [];
 
-            // Превращаем ID технологий в человекочитаемые метки
             const interestLabels = interestIdsList
               .map((id: string) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
               .filter(Boolean)
@@ -203,7 +223,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
             const userId = ctx.from?.id;
             const username = ctx.from?.username ? `@${ctx.from.username}` : 'скрыт';
 
-            // Формируем сообщение для администратора
             const adminMessage =
               `🚨 *Новая заполненная анкета!*\n\n` +
               `👤 *Имя:* ${name}\n` +
@@ -211,7 +230,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
               `💻 *Технологии:* ${interestLabels || 'Не выбрано'}\n` +
               `📅 *Дата:* ${new Date().toLocaleString('ru-RU')}`;
 
-            // Отправляем сообщение в админ-чат
             await ctx.api.sendMessage(adminChatId, adminMessage, {
               parse_mode: 'Markdown',
             });
@@ -224,7 +242,6 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
           logger.warn(`⚠️ ADMIN_CHAT_ID не настроен в конфигурации. Уведомление не отправлено.`);
         }
 
-        // Переходим на финальное окно благодарности
         await manager.goTo(ctx, 'completed');
       },
       restart: async (ctx, manager) => {
@@ -239,7 +256,7 @@ export function registerQuestionnaireModule(manager: DialogManager): void {
   // 5. Финальное окно
   manager.register({
     id: 'completed',
-    render: async (ctx) => {
+    render: async () => {
       const keyboard = new InlineKeyboard()
         .text('🔄 Заполнить заново', 'restart');
       return {

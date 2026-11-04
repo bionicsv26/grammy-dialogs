@@ -1,52 +1,71 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 
-export interface DialogSession {
+// Базовый интерфейс сессии с поддержкой дженерика состояния
+export interface DialogSession<TState extends Record<string, any> = Record<string, any>> {
   currentWindow?: string;
-  data: Record<string, any>;
+  data: TState & { error?: string; validatedInput?: any };
   messageId?: number;
   [key: string]: any;
 }
 
-export type DialogContext = Context & { session: DialogSession };
+export type DialogContext<TState extends Record<string, any> = Record<string, any>> = Context & {
+  session: DialogSession<TState>;
+};
 
 export type WindowRenderResult = {
   text: string;
-  keyboard: InlineKeyboard;
+  keyboard?: InlineKeyboard;
 };
 
-export type WindowActionHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
-export type WindowInputHandler = (ctx: DialogContext, manager: DialogManager) => Promise<void> | void;
+// Типизированные обработчики с учетом состояния и ID окон
+export type WindowActionHandler<TState extends Record<string, any>, TId extends string> = (
+  ctx: DialogContext<TState>,
+  manager: DialogManager<TState, TId>
+) => Promise<void> | void;
 
-export interface WindowConfig {
-  id: string;
-  render: (ctx: DialogContext) => Promise<WindowRenderResult> | WindowRenderResult;
-  actions?: Record<string, WindowActionHandler>;
-  onInput?: WindowInputHandler;
+export type WindowInputHandler<TState extends Record<string, any>, TId extends string> = (
+  ctx: DialogContext<TState>,
+  manager: DialogManager<TState, TId>
+) => Promise<void> | void;
+
+export interface WindowConfig<TState extends Record<string, any>, TId extends string> {
+  id: TId;
+  render: (ctx: DialogContext<TState>) => Promise<WindowRenderResult> | WindowRenderResult;
+  actions?: Record<string, WindowActionHandler<TState, TId>>;
+  onInput?: WindowInputHandler<TState, TId>;
   inputSchema?: z.ZodType;
 }
 
-export class DialogManager {
-  private windows = new Map<string, WindowConfig>();
+// Главный класс с дженериками TState (данные) и TId (ID окон)
+export class DialogManager<
+  TState extends Record<string, any> = Record<string, any>,
+  TId extends string = string
+> {
+  private windows = new Map<TId, WindowConfig<TState, TId>>();
 
-  constructor(private bot: Bot<DialogContext>) { }
+  constructor(private bot: Bot<DialogContext<TState>>) { }
 
-  register(window: WindowConfig): this {
+  register(window: WindowConfig<TState, TId>): this {
     this.windows.set(window.id, window);
     return this;
   }
 
-  async start(ctx: DialogContext, windowId: string, initialData: Record<string, any> = {}): Promise<void> {
+  async start(
+    ctx: DialogContext<TState>,
+    windowId: TId,
+    initialData: Partial<TState> = {}
+  ): Promise<void> {
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
     ctx.session.currentWindow = windowId;
-    ctx.session.data = { ...initialData };
+    ctx.session.data = { ...initialData } as any;
     delete ctx.session.messageId;
     await this.show(ctx);
   }
 
-  async goTo(ctx: DialogContext, windowId: string): Promise<void> {
+  async goTo(ctx: DialogContext<TState>, windowId: TId): Promise<void> {
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
@@ -54,8 +73,8 @@ export class DialogManager {
     await this.show(ctx);
   }
 
-  async show(ctx: DialogContext): Promise<void> {
-    const windowId = ctx.session.currentWindow;
+  async show(ctx: DialogContext<TState>): Promise<void> {
+    const windowId = ctx.session.currentWindow as TId | undefined;
     if (!windowId) return;
 
     const window = this.windows.get(windowId);
@@ -63,12 +82,21 @@ export class DialogManager {
 
     const { text, keyboard } = await window.render(ctx);
 
+    const otherOptions: { parse_mode: 'Markdown'; reply_markup?: InlineKeyboard } = {
+      parse_mode: 'Markdown',
+    };
+    if (keyboard) {
+      otherOptions.reply_markup = keyboard;
+    }
+
     if (ctx.session.messageId && ctx.chat) {
       try {
-        await ctx.api.editMessageText(ctx.chat.id, ctx.session.messageId, text, {
-          reply_markup: keyboard,
-          parse_mode: 'Markdown',
-        });
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          ctx.session.messageId,
+          text,
+          otherOptions
+        );
         return;
       } catch (error) {
         delete ctx.session.messageId;
@@ -76,17 +104,17 @@ export class DialogManager {
     }
 
     if (ctx.chat) {
-      const msg = await ctx.reply(text, {
-        reply_markup: keyboard,
-        parse_mode: 'Markdown',
-      });
+      const msg = await ctx.reply(
+        text,
+        otherOptions
+      );
       ctx.session.messageId = msg.message_id;
     }
   }
 
   middleware() {
-    return async (ctx: DialogContext, next: () => Promise<void>): Promise<void> => {
-      const windowId = ctx.session.currentWindow;
+    return async (ctx: DialogContext<TState>, next: () => Promise<void>): Promise<void> => {
+      const windowId = ctx.session.currentWindow as TId | undefined;
       if (!windowId) {
         return next();
       }
@@ -100,10 +128,9 @@ export class DialogManager {
       if (ctx.callbackQuery && ctx.callbackQuery.data) {
         const actionKey = ctx.callbackQuery.data;
 
-        // 🌐 УНИВЕРСАЛЬНЫЙ ПЕРЕХВАТЧИК: Возврат в главное меню из любой точки
         if (actionKey === 'global_back_to_menu') {
           try {
-            await this.goTo(ctx, 'main_menu'); // Укажите id вашего главного меню
+            await this.goTo(ctx, 'main_menu' as TId);
           } finally {
             if (!ctx.callbackQuery.inline_message_id) {
               await ctx.answerCallbackQuery().catch(() => { });
@@ -131,7 +158,6 @@ export class DialogManager {
 
       // 2. Обработка обычного текстового ввода с валидацией через Zod
       if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput)) {
-        // ⚡ Мгновенно удаляем сообщение пользователя из чата до валидации
         await ctx.deleteMessage().catch(() => { });
 
         const textInput = ctx.message.text.trim();
@@ -146,7 +172,6 @@ export class DialogManager {
             return;
           }
 
-          // ✅ Успешно прошли валидацию — обязательно очищаем прошлую ошибку!
           delete ctx.session.data.error;
           ctx.session.data.validatedInput = parseResult.data;
         }
