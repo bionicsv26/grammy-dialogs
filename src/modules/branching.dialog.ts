@@ -1,7 +1,40 @@
 import { InlineKeyboard } from 'grammy';
-import { DialogManager } from '../dialog-manager.js';
+import { DialogManager, type WindowActionHandler } from '../dialog-manager.js';
 
-export function registerBranchingModule(manager: DialogManager): void {
+// 1. Состояние, которое добавляет этот модуль
+export interface BranchingState {
+  chosenBranch?: 'tech' | 'design' | 'business';
+}
+
+// 2. ID окон, которые регистрирует этот модуль
+export type BranchingWindowId =
+  | 'select_branch'
+  | 'window_tech_step'
+  | 'window_design_step'
+  | 'window_business_step'
+  | 'completed';
+
+type BManager = DialogManager<BranchingState, BranchingWindowId>;
+
+export function registerBranchingModule<
+  TState extends BranchingState,
+  TId extends string
+>(appManager: DialogManager<TState, TId>): void {
+  const manager = appManager as unknown as BManager;
+
+  // Клавиатура у всех трёх веток одинаковая
+  const branchKeyboard = () =>
+    new InlineKeyboard()
+      .text('⬅️ Назад к выбору', 'back_to_menu')
+      .row()
+      .text('🏠 В главное меню', 'global_back_to_menu')
+      .row()
+      .text('✅ Завершить', 'finish_flow');
+
+  const branchActions: Record<string, WindowActionHandler<BranchingState, BranchingWindowId>> = {
+    back_to_menu: async (ctx, manager) => { await manager.goTo(ctx, 'select_branch'); },
+    finish_flow: async (ctx, manager) => { await manager.goTo(ctx, 'completed'); },
+  };
 
   // 1. Главное окно развилки
   manager.register({
@@ -15,7 +48,7 @@ export function registerBranchingModule(manager: DialogManager): void {
         .text('📊 Вариант 3: Аналитика и Бизнес', 'branch_business');
 
       return {
-        text: '📂 **Меню выбора ветки**\n\nВыберите направление, по которому хотите продолжить работу:',
+        text: '📂 *Меню выбора ветки*\n\nВыберите направление, по которому хотите продолжить работу:',
         keyboard,
       };
     },
@@ -35,81 +68,33 @@ export function registerBranchingModule(manager: DialogManager): void {
     },
   });
 
-  // 2. Ветка 1: Техническая цепочка
+  // 2. Ветка 1: Техническая
   manager.register({
     id: 'window_tech_step',
-    render: async () => {
-      const keyboard = new InlineKeyboard()
-        .text('⬅️ Назад к выбору', 'back_to_menu')
-        .row()
-        .text('🏠 В главное меню', 'global_back_to_menu')
-        .row()
-        .text('✅ Завершить', 'finish_flow');
-
-      return {
-        text: '⚙️ **Техническая ветка**\n\nЗдесь настраивается архитектура, бэкенд на NestJS, базы данных и Docker.',
-        keyboard,
-      };
-    },
-    actions: {
-      back_to_menu: async (ctx, manager) => {
-        await manager.goTo(ctx, 'select_branch');
-      },
-      finish_flow: async (ctx, manager) => {
-        await manager.goTo(ctx, 'completed');
-      },
-    },
+    render: async () => ({
+      text: '⚙️ *Техническая ветка*\n\nЗдесь настраивается архитектура, бэкенд на NestJS, базы данных и Docker.',
+      keyboard: branchKeyboard(),
+    }),
+    actions: branchActions,
   });
 
-  // 3. Ветка 2: Дизайн цепочка
+  // 3. Ветка 2: Дизайн
   manager.register({
     id: 'window_design_step',
-    render: async () => {
-      const keyboard = new InlineKeyboard()
-        .text('⬅️ Назад к выбору', 'back_to_menu')
-        .row()
-        .text('🏠 В главное меню', 'global_back_to_menu')
-        .row()
-        .text('✅ Завершить', 'finish_flow');
-
-      return {
-        text: '🎨 **Дизайн-ветка**\n\nЗдесь прорабатываются макеты в Figma, цвета, шрифты и пользовательский опыт.',
-        keyboard,
-      };
-    },
-    actions: {
-      back_to_menu: async (ctx, manager) => {
-        await manager.goTo(ctx, 'select_branch');
-      },
-      finish_flow: async (ctx, manager) => {
-        await manager.goTo(ctx, 'completed');
-      },
-    },
+    render: async () => ({
+      text: '🎨 *Дизайн-ветка*\n\nЗдесь прорабатываются макеты в Figma, цвета, шрифты и пользовательский опыт.',
+      keyboard: branchKeyboard(),
+    }),
+    actions: branchActions,
   });
 
-  // 4. Ветка 3: Бизнес цепочка
+  // 4. Ветка 3: Бизнес
   manager.register({
     id: 'window_business_step',
-    render: async () => {
-      const keyboard = new InlineKeyboard()
-        .text('⬅️ Назад к выбору', 'back_to_menu')
-        .row()
-        .text('🏠 В главное меню', 'global_back_to_menu')
-        .row()
-        .text('✅ Завершить', 'finish_flow');
-
-      return {
-        text: '📊 **Бизнес-ветка**\n\nЗдесь анализируются метрики, юнит-экономика, гипотезы и монетизация.',
-        keyboard,
-      };
-    },
-    actions: {
-      back_to_menu: async (ctx, manager) => {
-        await manager.goTo(ctx, 'select_branch');
-      },
-      finish_flow: async (ctx, manager) => {
-        await manager.goTo(ctx, 'completed');
-      },
-    },
+    render: async () => ({
+      text: '📊 *Бизнес-ветка*\n\nЗдесь анализируются метрики, юнит-экономика, гипотезы и монетизация.',
+      keyboard: branchKeyboard(),
+    }),
+    actions: branchActions,
   });
 }

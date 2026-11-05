@@ -1,19 +1,24 @@
 import { InlineKeyboard } from 'grammy';
-import { DialogManager } from '../dialog-manager.js';
+import {
+  DialogManager,
+  type DialogContext,
+  type WindowActionHandler,
+} from '../dialog-manager.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
   AVAILABLE_INTERESTS,
   nameSchema,
-  createInterestsSchema
+  createInterestsSchema,
 } from '../schemas/questionnaire.schema.js';
 
-// 1. Описываем структуру стейта и список всех ID окон в этом модуле
+// 1. Состояние и ID окон этого модуля
 export interface QuestionnaireState {
   name?: string;
   interests?: string[];
   returnTo?: QuestionnaireWindowId;
-  previousWindow?: QuestionnaireWindowId;
+  // Окно может принадлежать другому модулю, поэтому string
+  previousWindow?: string;
   error?: string;
   validatedInput?: any;
 }
@@ -25,11 +30,19 @@ export type QuestionnaireWindowId =
   | 'summary'
   | 'completed'
   | 'confirm_restart'
-  | 'select_branch'; // если у вас есть это окно в другом файле или добавить сюда
+  | 'select_branch';
 
-export function registerQuestionnaireModule(
-  manager: DialogManager<QuestionnaireState, QuestionnaireWindowId>
-): void {
+type QManager = DialogManager<QuestionnaireState, QuestionnaireWindowId>;
+type QCtx = DialogContext<QuestionnaireState, QuestionnaireWindowId>;
+
+// Принимает любой менеджер, у которого состояние и набор ID шире, чем нужно модулю
+export function registerQuestionnaireModule<
+  TState extends QuestionnaireState,
+  TId extends string
+>(appManager: DialogManager<TState, TId>): void {
+  // Единственное место, где тип сужается до того, что нужно модулю
+  const manager = appManager as unknown as QManager;
+
   // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
@@ -81,7 +94,7 @@ export function registerQuestionnaireModule(
       const returnTo = ctx.session.data.returnTo;
       delete ctx.session.data.returnTo;
 
-      await manager.goTo(ctx, returnTo || 'ask_interests');
+      await manager.goTo(ctx, returnTo ?? 'ask_interests');
     },
     actions: {
       main_menu: async (ctx, manager) => {
@@ -97,6 +110,32 @@ export function registerQuestionnaireModule(
   });
 
   // 3. Окно с выбором технологий (чекбоксы)
+  const toggleActions: Record<
+    string,
+    WindowActionHandler<QuestionnaireState, QuestionnaireWindowId>
+  > = Object.fromEntries(
+    AVAILABLE_INTERESTS.map(
+      (item): [string, WindowActionHandler<QuestionnaireState, QuestionnaireWindowId>] => [
+        `toggle_${item.id}`,
+        async (ctx: QCtx, manager: QManager) => {
+          if (!Array.isArray(ctx.session.data.interests)) {
+            ctx.session.data.interests = [];
+          }
+          const selected: string[] = ctx.session.data.interests;
+          const index = selected.indexOf(item.id);
+
+          if (index > -1) {
+            selected.splice(index, 1);
+          } else {
+            selected.push(item.id);
+          }
+
+          await manager.show(ctx);
+        },
+      ]
+    )
+  );
+
   manager.register({
     id: 'ask_interests',
     render: async (ctx) => {
@@ -127,43 +166,26 @@ export function registerQuestionnaireModule(
       };
     },
     actions: {
-      ...Object.fromEntries(
-        AVAILABLE_INTERESTS.map((item) => [
-          `toggle_${item.id}`,
-          async (ctx, manager) => {
-            if (!Array.isArray(ctx.session.data.interests)) {
-              ctx.session.data.interests = [];
-            }
-            const selected: string[] = ctx.session.data.interests;
-            const index = selected.indexOf(item.id);
-
-            if (index > -1) {
-              selected.splice(index, 1);
-            } else {
-              selected.push(item.id);
-            }
-
-            await manager.show(ctx);
-          },
-        ])
-      ),
+      ...toggleActions,
       confirm_interests: async (ctx, manager) => {
-        const selected = ctx.session.data.interests || [];
+        const selected = ctx.session.data.interests ?? [];
         const parseResult = createInterestsSchema(1, 4).safeParse(selected);
 
         if (!parseResult.success) {
           const errorMessage = parseResult.error.issues[0]?.message || 'Неверный выбор';
-          await ctx.answerCallbackQuery({
-            text: `⚠️ ${errorMessage}`,
-            show_alert: true,
-          }).catch(() => { });
+          await ctx
+            .answerCallbackQuery({
+              text: `⚠️ ${errorMessage}`,
+              show_alert: true,
+            })
+            .catch(() => { });
           return;
         }
 
         const returnTo = ctx.session.data.returnTo;
         delete ctx.session.data.returnTo;
 
-        await manager.goTo(ctx, returnTo || 'summary');
+        await manager.goTo(ctx, returnTo ?? 'summary');
       },
       ask_name: async (ctx, manager) => {
         await manager.goTo(ctx, 'ask_name');
@@ -180,10 +202,10 @@ export function registerQuestionnaireModule(
     id: 'summary',
     render: async (ctx) => {
       const name = ctx.session.data.name || 'Аноним';
-      const interestIdsList = ctx.session.data.interests || [];
+      const interestIdsList = ctx.session.data.interests ?? [];
 
       const interestLabels = interestIdsList
-        .map((id: string) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
+        .map((id) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
         .filter(Boolean)
         .join(', ');
 
@@ -213,10 +235,10 @@ export function registerQuestionnaireModule(
         if (adminChatId) {
           try {
             const name = ctx.session.data.name || 'Аноним';
-            const interestIdsList = ctx.session.data.interests || [];
+            const interestIdsList = ctx.session.data.interests ?? [];
 
             const interestLabels = interestIdsList
-              .map((id: string) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
+              .map((id) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
               .filter(Boolean)
               .join(', ');
 
@@ -245,9 +267,6 @@ export function registerQuestionnaireModule(
         await manager.goTo(ctx, 'completed');
       },
       restart: async (ctx, manager) => {
-        delete ctx.session.data.interests;
-        delete ctx.session.data.name;
-        delete ctx.session.data.returnTo;
         await manager.start(ctx, 'main_menu');
       },
     },
@@ -257,8 +276,7 @@ export function registerQuestionnaireModule(
   manager.register({
     id: 'completed',
     render: async () => {
-      const keyboard = new InlineKeyboard()
-        .text('🔄 Заполнить заново', 'restart');
+      const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
       return {
         text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*',
         keyboard,
@@ -266,18 +284,15 @@ export function registerQuestionnaireModule(
     },
     actions: {
       restart: async (ctx, manager) => {
-        delete ctx.session.data.interests;
-        delete ctx.session.data.name;
-        delete ctx.session.data.returnTo;
         await manager.start(ctx, 'main_menu');
       },
     },
   });
 
-  // Окно подтверждения сброса при отправке /start
+  // 6. Окно подтверждения сброса при отправке /start
   manager.register({
     id: 'confirm_restart',
-    render: async (ctx) => {
+    render: async () => {
       const keyboard = new InlineKeyboard()
         .text('⚠️ Да, сбросить и начать заново', 'do_restart')
         .row()
@@ -292,11 +307,11 @@ export function registerQuestionnaireModule(
     },
     actions: {
       do_restart: async (ctx, manager) => {
-        ctx.session.data = {};
         await manager.start(ctx, 'main_menu');
       },
       cancel_restart: async (ctx, manager) => {
-        const prevWindow = ctx.session.data.previousWindow || 'summary';
+        const prevWindow = (ctx.session.data.previousWindow ?? 'summary') as QuestionnaireWindowId;
+        delete ctx.session.data.previousWindow;
         await manager.goTo(ctx, prevWindow);
       },
     },

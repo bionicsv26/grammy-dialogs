@@ -1,16 +1,21 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 
-// Базовый интерфейс сессии с поддержкой дженерика состояния
-export interface DialogSession<TState extends Record<string, any> = Record<string, any>> {
-  currentWindow?: string;
+// Базовый интерфейс сессии с поддержкой дженериков состояния и ID окон
+export interface DialogSession<
+  TState extends Record<string, any> = Record<string, any>,
+  TId extends string = string
+> {
+  currentWindow?: TId;
   data: TState & { error?: string; validatedInput?: any };
   messageId?: number;
-  [key: string]: any;
 }
 
-export type DialogContext<TState extends Record<string, any> = Record<string, any>> = Context & {
-  session: DialogSession<TState>;
+export type DialogContext<
+  TState extends Record<string, any> = Record<string, any>,
+  TId extends string = string
+> = Context & {
+  session: DialogSession<TState, TId>;
 };
 
 export type WindowRenderResult = {
@@ -20,18 +25,20 @@ export type WindowRenderResult = {
 
 // Типизированные обработчики с учетом состояния и ID окон
 export type WindowActionHandler<TState extends Record<string, any>, TId extends string> = (
-  ctx: DialogContext<TState>,
+  ctx: DialogContext<TState, TId>,
   manager: DialogManager<TState, TId>
 ) => Promise<void> | void;
 
 export type WindowInputHandler<TState extends Record<string, any>, TId extends string> = (
-  ctx: DialogContext<TState>,
+  ctx: DialogContext<TState, TId>,
   manager: DialogManager<TState, TId>
 ) => Promise<void> | void;
 
 export interface WindowConfig<TState extends Record<string, any>, TId extends string> {
   id: TId;
-  render: (ctx: DialogContext<TState>) => Promise<WindowRenderResult> | WindowRenderResult;
+  render: (
+    ctx: DialogContext<TState, TId>
+  ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId>>;
   onInput?: WindowInputHandler<TState, TId>;
   inputSchema?: z.ZodType;
@@ -44,7 +51,7 @@ export class DialogManager<
 > {
   private windows = new Map<TId, WindowConfig<TState, TId>>();
 
-  constructor(private bot: Bot<DialogContext<TState>>) { }
+  constructor(private bot: Bot<DialogContext<TState, TId>>) { }
 
   register(window: WindowConfig<TState, TId>): this {
     this.windows.set(window.id, window);
@@ -52,7 +59,7 @@ export class DialogManager<
   }
 
   async start(
-    ctx: DialogContext<TState>,
+    ctx: DialogContext<TState, TId>,
     windowId: TId,
     initialData: Partial<TState> = {}
   ): Promise<void> {
@@ -60,12 +67,12 @@ export class DialogManager<
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
     ctx.session.currentWindow = windowId;
-    ctx.session.data = { ...initialData } as any;
+    ctx.session.data = { ...initialData } as DialogSession<TState, TId>['data'];
     delete ctx.session.messageId;
     await this.show(ctx);
   }
 
-  async goTo(ctx: DialogContext<TState>, windowId: TId): Promise<void> {
+  async goTo(ctx: DialogContext<TState, TId>, windowId: TId): Promise<void> {
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
@@ -73,8 +80,8 @@ export class DialogManager<
     await this.show(ctx);
   }
 
-  async show(ctx: DialogContext<TState>): Promise<void> {
-    const windowId = ctx.session.currentWindow as TId | undefined;
+  async show(ctx: DialogContext<TState, TId>): Promise<void> {
+    const windowId = ctx.session.currentWindow;
     if (!windowId) return;
 
     const window = this.windows.get(windowId);
@@ -104,17 +111,17 @@ export class DialogManager<
     }
 
     if (ctx.chat) {
-      const msg = await ctx.reply(
-        text,
-        otherOptions
-      );
+      const msg = await ctx.reply(text, otherOptions);
       ctx.session.messageId = msg.message_id;
     }
   }
 
   middleware() {
-    return async (ctx: DialogContext<TState>, next: () => Promise<void>): Promise<void> => {
-      const windowId = ctx.session.currentWindow as TId | undefined;
+    return async (
+      ctx: DialogContext<TState, TId>,
+      next: () => Promise<void>
+    ): Promise<void> => {
+      const windowId = ctx.session.currentWindow;
       if (!windowId) {
         return next();
       }

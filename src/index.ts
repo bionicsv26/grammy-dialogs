@@ -1,13 +1,25 @@
-// src/index.ts
 import { Bot, session } from 'grammy';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { Redis } from 'ioredis';
 import { RedisAdapter } from '@grammyjs/storage-redis';
 import { config } from './config.js';
 import { DialogManager, type DialogContext } from './dialog-manager.js';
-import { registerQuestionnaireModule } from './modules/questionnaire.dialog.js';
-import { registerBranchingModule } from './modules/branching.dialog.js'
+import {
+  registerQuestionnaireModule,
+  type QuestionnaireState,
+  type QuestionnaireWindowId,
+} from './modules/questionnaire.dialog.js';
+import {
+  registerBranchingModule,
+  type BranchingState,
+  type BranchingWindowId,
+} from './modules/branching.dialog.js';
 import { logger } from './logger.js';
+
+// 1. Объединяем состояние и ID окон со всех модулей
+export type AppState = QuestionnaireState & BranchingState;
+export type AppWindowId = QuestionnaireWindowId | BranchingWindowId;
+export type AppContext = DialogContext<AppState, AppWindowId>;
 
 const isDev = config.NODE_ENV === 'development';
 const clientConfig =
@@ -21,28 +33,25 @@ const clientConfig =
     }
     : {};
 
-const bot = new Bot<DialogContext>(config.BOT_TOKEN, clientConfig);
+const bot = new Bot<AppContext>(config.BOT_TOKEN, clientConfig);
 
-// 1. Настройка подключения к Redis и сессий
+// 2. Redis и сессии
 const redisClient = new Redis({
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
   password: config.REDIS_PASSWORD,
 });
 
-const storage = new RedisAdapter({
-  instance: redisClient,
-});
+const storage = new RedisAdapter({ instance: redisClient });
 
-// ✅ Подключаем хранилище сессий в Redis
 bot.use(
   session({
-    initial: (): DialogContext['session'] => ({ data: {} }),
+    initial: (): AppContext['session'] => ({ data: {} }),
     storage,
   })
 );
 
-// 2. 📊 Контекстное логирование (подключаем ПОСЛЕ DialogManager!)
+// 3. Контекстное логирование (после сессий)
 bot.use(async (ctx, next) => {
   const updateType = ctx.update
     ? Object.keys(ctx.update).filter((k) => k !== 'update_id')[0]
@@ -50,7 +59,6 @@ bot.use(async (ctx, next) => {
   const userId = ctx.from?.id;
   const username = ctx.from?.username || ctx.from?.first_name || 'Аноним';
 
-  // ✅ Читаем из корня сессии ctx.session.currentWindow
   const currentWindow = ctx.session?.currentWindow || 'unknown';
   const callbackData = ctx.callbackQuery?.data;
   const userInputText = ctx.message?.text;
@@ -66,56 +74,54 @@ bot.use(async (ctx, next) => {
   const start = Date.now();
   try {
     await next();
-    const duration = Date.now() - start;
-    // ✅ Читаем из корня сессии после отработки диалога
     const nextWindow = ctx.session?.currentWindow || 'unknown';
 
     logger.info(`✅ Успешно обработано`, {
       userId,
       fromWindow: currentWindow,
       toWindow: nextWindow,
-      durationMs: duration,
+      durationMs: Date.now() - start,
     });
   } catch (error) {
-    const duration = Date.now() - start;
     logger.error(`❌ Ошибка при обработке`, {
       userId,
       currentWindow,
-      durationMs: duration,
+      durationMs: Date.now() - start,
       error,
     });
     throw error;
   }
 });
 
-// 3. Инициализируем и подключаем DialogManager (чтобы он готовил контекст сессии)
-const manager = new DialogManager(bot);
+// 4. DialogManager и модули
+const manager = new DialogManager<AppState, AppWindowId>(bot);
 bot.use(manager.middleware());
 
-// Регистрация модулей диалога
 registerQuestionnaireModule(manager);
 registerBranchingModule(manager);
 
-// Перехват команды /start с защитой от случайного сброса
+// Перехват /start с защитой от случайного сброса
 bot.command('start', async (ctx) => {
-  const isProfileInProgress =
-    ctx.session.data?.name || ctx.session.currentWindow;
+  const current = ctx.session.currentWindow;
 
-  if (
-    isProfileInProgress &&
-    ctx.session.currentWindow !== 'main_menu' &&
-    ctx.session.currentWindow !== 'completed'
-  ) {
-    ctx.session.data.previousWindow = ctx.session.currentWindow || 'ask_name';
-    await manager.start(ctx, 'confirm_restart');
+  // Нет активного диалога, либо он на «безопасном» окне, можно сразу сбрасывать
+  if (!current || current === 'main_menu' || current === 'completed') {
+    await manager.start(ctx, 'main_menu');
     return;
   }
 
-  ctx.session.data = {};
-  await manager.start(ctx, 'main_menu');
+  // Повторный /start на окне подтверждения: просто показываем его снова
+  if (current === 'confirm_restart') {
+    await manager.show(ctx);
+    return;
+  }
+
+  // Запоминаем окно и показываем подтверждение. Именно goTo, а не start:
+  // start() обнуляет ctx.session.data и стёрла бы введённые данные.
+  ctx.session.data.previousWindow = current;
+  await manager.goTo(ctx, 'confirm_restart');
 });
 
-// Глобальный обработчик ошибок
 bot.catch((err) => {
   const ctx = err.ctx;
   logger.error(`Глобальная ошибка бота на апдейте ${ctx.update.update_id}:`, {
