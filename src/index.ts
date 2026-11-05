@@ -42,7 +42,10 @@ const redisClient = new Redis({
   password: config.REDIS_PASSWORD,
 });
 
-const storage = new RedisAdapter({ instance: redisClient });
+const storage = new RedisAdapter({
+  instance: redisClient,
+  ttl: 60 * 60 * 24, // Время жизни сессии в секундах (здесь: 24 часа)
+});
 
 bot.use(
   session({
