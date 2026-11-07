@@ -11,6 +11,19 @@ const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().min(1, 'Пароль Redis обязателен'),
   ADMIN_CHAT_ID: z.coerce.number().default(0),
+
+  // 👥 Список ID администраторов (строка из .env преобразуется в массив чисел)
+  ADMIN_USER_IDS: z
+    .string()
+    .default('')
+    .transform((val) =>
+      val
+        ? val
+          .split(',')
+          .map((id) => Number(id.trim()))
+          .filter((id) => !isNaN(id))
+        : []
+    ),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

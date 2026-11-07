@@ -11,6 +11,7 @@ import {
   nameSchema,
   createInterestsSchema,
 } from '../schemas/questionnaire.schema.js';
+import { isUserAdmin } from '../utils/auth.js';
 
 // 1. Состояние и ID окон этого модуля
 export interface QuestionnaireState {
@@ -30,7 +31,8 @@ export type QuestionnaireWindowId =
   | 'summary'
   | 'completed'
   | 'confirm_restart'
-  | 'select_branch';
+  | 'select_branch'
+  | 'admin_panel';
 
 type QManager = DialogManager<QuestionnaireState, QuestionnaireWindowId>;
 type QCtx = DialogContext<QuestionnaireState, QuestionnaireWindowId>;
@@ -46,11 +48,17 @@ export function registerQuestionnaireModule<
   // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
-    render: async () => {
+    render: async (ctx) => {
       const keyboard = new InlineKeyboard()
         .text('▶️ Начать анкету', 'to_form')
         .row()
         .text('🔀 Выбор направления', 'proceed_to_branches');
+
+      // 🔐 Динамически добавляем кнопку админки для администраторов
+      if (isUserAdmin(ctx.from?.id)) {
+        keyboard.row().text('🔐 Админ-панель', 'open_admin');
+      }
+
       return {
         text: '*Добро пожаловать!*\n\nЭто демонстрация мини-библиотеки диалогов на TypeScript и grammY.',
         keyboard,
@@ -62,6 +70,9 @@ export function registerQuestionnaireModule<
       },
       proceed_to_branches: async (ctx, manager) => {
         await manager.goTo(ctx, 'select_branch');
+      },
+      open_admin: async (ctx, manager) => {
+        await manager.goTo(ctx, 'admin_panel');
       },
     },
   });
@@ -200,6 +211,13 @@ export function registerQuestionnaireModule<
   // 4. Окно предпросмотра (Summary)
   manager.register({
     id: 'summary',
+    guard: async (ctx) => {
+      // Если имя не заполнено — перенаправляем обратно на шаг ввода имени
+      if (!ctx.session.data.name) {
+        return 'ask_name'; // Можно вернуть ID окна для редиректа
+      }
+      return true; // Доступ разрешен
+    },
     render: async (ctx) => {
       const name = ctx.session.data.name || 'Аноним';
       const interestIdsList = ctx.session.data.interests ?? [];
@@ -313,6 +331,35 @@ export function registerQuestionnaireModule<
         const prevWindow = (ctx.session.data.previousWindow ?? 'summary') as QuestionnaireWindowId;
         delete ctx.session.data.previousWindow;
         await manager.goTo(ctx, prevWindow);
+      },
+    },
+  });
+
+  // 🛡️ Окно админ-панели с защитой
+  manager.register({
+    id: 'admin_panel',
+    guard: async (ctx) => {
+      if (!isUserAdmin(ctx.from?.id)) {
+        await ctx
+          .answerCallbackQuery({
+            text: '⚠️ У вас нет доступа к этому разделу',
+            show_alert: true,
+          })
+          .catch(() => { });
+        return 'main_menu'; // Возврат в главное меню при попытке несанкционированного доступа
+      }
+      return true;
+    },
+    render: async () => {
+      const keyboard = new InlineKeyboard().text('🏠 В главное меню', 'main_menu');
+      return {
+        text: '🔐 *Панель администратора*\n\nДобро пожаловать, босс! Здесь отображается управление системой.',
+        keyboard,
+      };
+    },
+    actions: {
+      main_menu: async (ctx, manager) => {
+        await manager.goTo(ctx, 'main_menu');
       },
     },
   });

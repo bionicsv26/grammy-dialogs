@@ -1,7 +1,6 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 
-// Базовый интерфейс сессии с поддержкой дженериков состояния и ID окон
 export interface DialogSession<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string
@@ -23,7 +22,6 @@ export type WindowRenderResult = {
   keyboard?: InlineKeyboard;
 };
 
-// Типизированные обработчики с учетом состояния и ID окон
 export type WindowActionHandler<TState extends Record<string, any>, TId extends string> = (
   ctx: DialogContext<TState, TId>,
   manager: DialogManager<TState, TId>
@@ -34,6 +32,12 @@ export type WindowInputHandler<TState extends Record<string, any>, TId extends s
   manager: DialogManager<TState, TId>
 ) => Promise<void> | void;
 
+// 🛡️ Тип для защитных функций (Guards)
+export type WindowGuard<TState extends Record<string, any>, TId extends string> = (
+  ctx: DialogContext<TState, TId>,
+  manager: DialogManager<TState, TId>
+) => Promise<boolean | TId> | boolean | TId;
+
 export interface WindowConfig<TState extends Record<string, any>, TId extends string> {
   id: TId;
   render: (
@@ -42,9 +46,9 @@ export interface WindowConfig<TState extends Record<string, any>, TId extends st
   actions?: Record<string, WindowActionHandler<TState, TId>>;
   onInput?: WindowInputHandler<TState, TId>;
   inputSchema?: z.ZodType;
+  guard?: WindowGuard<TState, TId>; // 🛡️ Защита окна
 }
 
-// Главный класс с дженериками TState (данные) и TId (ID окон)
 export class DialogManager<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string
@@ -86,6 +90,18 @@ export class DialogManager<
 
     const window = this.windows.get(windowId);
     if (!window) return;
+
+    // 🛡️ Проверяем Guard перед рендером
+    if (window.guard) {
+      const guardResult = await window.guard(ctx, this);
+      if (guardResult === false) {
+        return; // Галерея/окно заблокированы гардом
+      }
+      if (typeof guardResult === 'string' && guardResult !== windowId) {
+        await this.goTo(ctx, guardResult as TId);
+        return;
+      }
+    }
 
     const { text, keyboard } = await window.render(ctx);
 
@@ -129,6 +145,18 @@ export class DialogManager<
       const window = this.windows.get(windowId);
       if (!window) {
         return next();
+      }
+
+      // 🛡️ Проверяем Guard на уровне middleware перед обработкой кликов или ввода
+      if (window.guard) {
+        const guardResult = await window.guard(ctx, this);
+        if (guardResult === false) {
+          return;
+        }
+        if (typeof guardResult === 'string' && guardResult !== windowId) {
+          await this.goTo(ctx, guardResult as TId);
+          return;
+        }
       }
 
       // 1. Обработка нажатий на инлайн-кнопки
