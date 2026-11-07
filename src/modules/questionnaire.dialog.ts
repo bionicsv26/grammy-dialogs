@@ -97,6 +97,7 @@ export function registerQuestionnaireModule<
 
       return { text, keyboard };
     },
+    formatter: (text) => text.trim().toLowerCase().replace(/\s+/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase()),
     inputSchema: nameSchema,
     onInput: async (ctx, manager) => {
       ctx.session.data.name = ctx.session.data.validatedInput;

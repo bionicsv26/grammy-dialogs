@@ -38,6 +38,9 @@ export type WindowGuard<TState extends Record<string, any>, TId extends string> 
   manager: DialogManager<TState, TId>
 ) => Promise<boolean | TId> | boolean | TId;
 
+// 🪄 Тип для кастомного форматтера ввода
+export type WindowInputFormatter = (rawInput: string) => any;
+
 export interface WindowConfig<TState extends Record<string, any>, TId extends string> {
   id: TId;
   render: (
@@ -45,6 +48,7 @@ export interface WindowConfig<TState extends Record<string, any>, TId extends st
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId>>;
   onInput?: WindowInputHandler<TState, TId>;
+  formatter?: WindowInputFormatter; // 🪄 Опциональный форматтер
   inputSchema?: z.ZodType;
   guard?: WindowGuard<TState, TId>; // 🛡️ Защита окна
 }
@@ -191,14 +195,18 @@ export class DialogManager<
         return;
       }
 
-      // 2. Обработка обычного текстового ввода с валидацией через Zod
-      if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput)) {
+      // 2. Обработка обычного текстового ввода с форматтером и валидацией через Zod
+      if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput || window.formatter)) {
         await ctx.deleteMessage().catch(() => { });
 
-        const textInput = ctx.message.text.trim();
+        const rawInput = ctx.message.text.trim();
 
+        // 🪄 Шаг 1: Применяем кастомный форматтер, если он задан
+        const formattedInput = window.formatter ? window.formatter(rawInput) : rawInput;
+
+        // 🪄 Шаг 2: Валидируем уже отформатированные данные через Zod
         if (window.inputSchema) {
-          const parseResult = window.inputSchema.safeParse(textInput);
+          const parseResult = window.inputSchema.safeParse(formattedInput);
 
           if (!parseResult.success) {
             const firstError = parseResult.error.issues[0]?.message || 'Неверный формат данных';
@@ -209,6 +217,9 @@ export class DialogManager<
 
           delete ctx.session.data.error;
           ctx.session.data.validatedInput = parseResult.data;
+        } else {
+          // Если схемы нет, но есть форматтер — передаем отформатированный результат в validatedInput
+          ctx.session.data.validatedInput = formattedInput;
         }
 
         if (window.onInput) {
