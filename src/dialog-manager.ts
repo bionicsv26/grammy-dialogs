@@ -1,5 +1,6 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
+import { logger } from './logger.js';
 
 export interface DialogSession<
   TState extends Record<string, any> = Record<string, any>,
@@ -82,26 +83,46 @@ export class DialogManager<
 
   async goTo(ctx: DialogContext<TState, TId>, windowId: TId): Promise<void> {
     if (!this.windows.has(windowId)) {
+      logger.error(`Attempted to navigate to unregistered window`, {
+        userId: ctx.from?.id,
+        targetWindow: windowId,
+      });
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
+
+    logger.info(`User navigated to window`, {
+      userId: ctx.from?.id,
+      fromWindow: ctx.session.currentWindow || 'none',
+      toWindow: windowId,
+    });
+
     ctx.session.currentWindow = windowId;
     await this.show(ctx);
   }
 
   async show(ctx: DialogContext<TState, TId>): Promise<void> {
+    const userId = ctx.from?.id;
     const windowId = ctx.session.currentWindow;
-    if (!windowId) return;
+    if (!windowId) {
+      logger.warn(`Attempted to show window, but currentWindow is not set`, { userId });
+      return;
+    }
 
     const window = this.windows.get(windowId);
-    if (!window) return;
+    if (!window) {
+      logger.error(`Window not found in registry during show`, { userId, windowId });
+      return;
+    }
 
     // 🛡️ Проверяем Guard перед рендером
     if (window.guard) {
       const guardResult = await window.guard(ctx, this);
       if (guardResult === false) {
+        logger.warn(`Window guard blocked access (render halted)`, { userId, windowId });
         return; // Галерея/окно заблокированы гардом
       }
       if (typeof guardResult === 'string' && guardResult !== windowId) {
+        logger.info(`Window guard redirected user`, { userId, fromWindow: windowId, toWindow: guardResult });
         await this.goTo(ctx, guardResult as TId);
         return;
       }
@@ -126,6 +147,7 @@ export class DialogManager<
         );
         return;
       } catch (error) {
+        logger.debug(`Failed to edit message, sending a new one`, { userId, error });
         delete ctx.session.messageId;
       }
     }
@@ -141,6 +163,7 @@ export class DialogManager<
       ctx: DialogContext<TState, TId>,
       next: () => Promise<void>
     ): Promise<void> => {
+      const userId = ctx.from?.id;
       const windowId = ctx.session.currentWindow;
       if (!windowId) {
         return next();
@@ -155,9 +178,11 @@ export class DialogManager<
       if (window.guard) {
         const guardResult = await window.guard(ctx, this);
         if (guardResult === false) {
+          logger.warn(`Window guard blocked middleware action`, { userId, windowId });
           return;
         }
         if (typeof guardResult === 'string' && guardResult !== windowId) {
+          logger.info(`Window guard redirected user in middleware`, { userId, fromWindow: windowId, toWindow: guardResult });
           await this.goTo(ctx, guardResult as TId);
           return;
         }
@@ -166,6 +191,8 @@ export class DialogManager<
       // 1. Обработка нажатий на инлайн-кнопки
       if (ctx.callbackQuery && ctx.callbackQuery.data) {
         const actionKey = ctx.callbackQuery.data;
+
+        logger.debug(`User triggered action`, { userId, windowId, actionKey });
 
         if (actionKey === 'global_back_to_menu') {
           try {
@@ -181,12 +208,21 @@ export class DialogManager<
         const actionHandler = window.actions?.[actionKey];
 
         if (!actionHandler) {
+          logger.warn(`Action handler not found`, { userId, windowId, actionKey });
           await ctx.answerCallbackQuery({ text: 'Действие недоступно' }).catch(() => { });
           return next();
         }
 
         try {
           await actionHandler(ctx, this);
+        } catch (error) {
+          logger.error(`Error occurred while executing action handler`, {
+            userId,
+            windowId,
+            actionKey,
+            error,
+          });
+          throw error;
         } finally {
           if (!ctx.callbackQuery.inline_message_id) {
             await ctx.answerCallbackQuery().catch(() => { });
@@ -210,6 +246,14 @@ export class DialogManager<
 
           if (!parseResult.success) {
             const firstError = parseResult.error.issues[0]?.message || 'Неверный формат данных';
+
+            logger.warn(`Window input validation failed`, {
+              userId,
+              windowId,
+              error: firstError,
+              rawInput,
+            });
+
             ctx.session.data.error = firstError;
             await this.show(ctx);
             return;
@@ -223,7 +267,16 @@ export class DialogManager<
         }
 
         if (window.onInput) {
-          await window.onInput(ctx, this);
+          try {
+            await window.onInput(ctx, this);
+          } catch (error) {
+            logger.error(`Error occurred while executing onInput handler`, {
+              userId,
+              windowId,
+              error,
+            });
+            throw error;
+          }
         }
         return;
       }
