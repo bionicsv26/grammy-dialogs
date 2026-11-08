@@ -44,7 +44,7 @@ const redisClient = new Redis({
 
 const storage = new RedisAdapter({
   instance: redisClient,
-  ttl: 60 * 60 * 24, // Время жизни сессии в секундах (здесь: 24 часа)
+  ttl: 60 * 60 * 24, // Время жизни сессии в секундах (24 часа)
 });
 
 bot.use(
@@ -107,20 +107,19 @@ registerBranchingModule(manager);
 bot.command('start', async (ctx) => {
   const current = ctx.session.currentWindow;
 
-  // Нет активного диалога, либо он на «безопасном» окне, можно сразу сбрасывать
+  // Нет активного диалога или безопасное окно — сбрасываем в главное меню
   if (!current || current === 'main_menu' || current === 'completed') {
     await manager.start(ctx, 'main_menu');
     return;
   }
 
-  // Повторный /start на окне подтверждения: просто показываем его снова
+  // Повторный /start на окне подтверждения перезапуска
   if (current === 'confirm_restart') {
     await manager.show(ctx);
     return;
   }
 
-  // Запоминаем окно и показываем подтверждение. Именно goTo, а не start:
-  // start() обнуляет ctx.session.data и стёрла бы введённые данные.
+  // Сохраняем предыдущее окно и переходим к подтверждению сброса
   ctx.session.data.previousWindow = current;
   await manager.goTo(ctx, 'confirm_restart');
 });
