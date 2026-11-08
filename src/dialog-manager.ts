@@ -7,6 +7,7 @@ export interface DialogSession<
   TId extends string = string
 > {
   currentWindow?: TId;
+  history?: string[]; // 👈 Стек истории переходов
   data: TState & { error?: string; validatedInput?: any };
   messageId?: number;
 }
@@ -52,6 +53,7 @@ export interface WindowConfig<TState extends Record<string, any>, TId extends st
   formatter?: WindowInputFormatter; // 🪄 Опциональный форматтер
   inputSchema?: z.ZodType;
   guard?: WindowGuard<TState, TId>; // 🛡️ Защита окна
+  disableBackButton?: boolean; // 👈 Флаг отключения авто-кнопки Назад для конкретного окна
 }
 
 export class DialogManager<
@@ -67,6 +69,11 @@ export class DialogManager<
     return this;
   }
 
+  // 🪄 Хелпер для добавления кнопки «Назад» к любой инлайн-клавиатуре
+  static appendBackButton(keyboard: InlineKeyboard, text: string = '⬅️ Назад'): InlineKeyboard {
+    return keyboard.row().text(text, 'global_back');
+  }
+
   async start(
     ctx: DialogContext<TState, TId>,
     windowId: TId,
@@ -75,28 +82,65 @@ export class DialogManager<
     if (!this.windows.has(windowId)) {
       throw new Error(`Window with id "${windowId}" is not registered.`);
     }
+
+    logger.info(`Starting dialog at window`, { userId: ctx.from?.id, windowId });
+
     ctx.session.currentWindow = windowId;
     ctx.session.data = { ...initialData } as DialogSession<TState, TId>['data'];
     delete ctx.session.messageId;
+    ctx.session.history = []; // Очищаем историю при старте
     await this.show(ctx);
   }
 
+  // 🧭 Переход с сохранением истории
   async goTo(ctx: DialogContext<TState, TId>, windowId: TId): Promise<void> {
     if (!this.windows.has(windowId)) {
-      logger.error(`Attempted to navigate to unregistered window`, {
-        userId: ctx.from?.id,
-        targetWindow: windowId,
-      });
+      logger.error(`Attempted to navigate to unregistered window`, { userId: ctx.from?.id, targetWindow: windowId });
       throw new Error(`Window with id "${windowId}" is not registered.`);
+    }
+
+    const currentWindow = ctx.session.currentWindow;
+
+    // Если переходим на то же самое окно, ничего не делаем
+    if (currentWindow === windowId) return;
+
+    // Инициализируем историю, если её не было
+    if (!ctx.session.history) {
+      ctx.session.history = [];
+    }
+
+    // Сохраняем текущее окно в историю перед переходом
+    if (currentWindow) {
+      ctx.session.history.push(currentWindow);
     }
 
     logger.info(`User navigated to window`, {
       userId: ctx.from?.id,
-      fromWindow: ctx.session.currentWindow || 'none',
+      fromWindow: currentWindow || 'none',
       toWindow: windowId,
+      historyDepth: ctx.session.history.length,
     });
 
     ctx.session.currentWindow = windowId;
+    await this.show(ctx);
+  }
+
+  // ⬅️ Возврат на предыдущее окно из стека
+  async goBack(ctx: DialogContext<TState, TId>): Promise<void> {
+    if (!ctx.session.history || ctx.session.history.length === 0) {
+      logger.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
+      return;
+    }
+
+    const previousWindow = ctx.session.history.pop() as TId;
+
+    logger.info(`User went back`, {
+      userId: ctx.from?.id,
+      toWindow: previousWindow,
+      remainingHistory: ctx.session.history.length,
+    });
+
+    ctx.session.currentWindow = previousWindow;
     await this.show(ctx);
   }
 
@@ -128,7 +172,21 @@ export class DialogManager<
       }
     }
 
-    const { text, keyboard } = await window.render(ctx);
+    const rendered = await window.render(ctx);
+    const text = rendered.text;
+    let keyboard = rendered.keyboard;
+
+    // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений
+    const isMainOrCompleted = windowId === 'main_menu' || windowId === 'completed' || windowId === 'confirm_restart';
+    if (
+      keyboard &&
+      ctx.session.history &&
+      ctx.session.history.length > 0 &&
+      !isMainOrCompleted &&
+      !window.disableBackButton
+    ) {
+      keyboard = DialogManager.appendBackButton(keyboard);
+    }
 
     const otherOptions: { parse_mode: 'Markdown'; reply_markup?: InlineKeyboard } = {
       parse_mode: 'Markdown',
@@ -197,6 +255,17 @@ export class DialogManager<
         if (actionKey === 'global_back_to_menu') {
           try {
             await this.goTo(ctx, 'main_menu' as TId);
+          } finally {
+            if (!ctx.callbackQuery.inline_message_id) {
+              await ctx.answerCallbackQuery().catch(() => { });
+            }
+          }
+          return;
+        }
+
+        if (actionKey === 'global_back') {
+          try {
+            await this.goBack(ctx);
           } finally {
             if (!ctx.callbackQuery.inline_message_id) {
               await ctx.answerCallbackQuery().catch(() => { });

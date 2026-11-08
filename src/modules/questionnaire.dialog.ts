@@ -80,6 +80,7 @@ export function registerQuestionnaireModule<
   // 2. Окно ввода имени
   manager.register({
     id: 'ask_name',
+    disableBackButton: true,
     render: async (ctx) => {
       const error = ctx.session.data.error;
       delete ctx.session.data.error;
@@ -150,6 +151,7 @@ export function registerQuestionnaireModule<
 
   manager.register({
     id: 'ask_interests',
+    disableBackButton: true,
     render: async (ctx) => {
       if (!Array.isArray(ctx.session.data.interests)) {
         ctx.session.data.interests = [];
@@ -294,6 +296,7 @@ export function registerQuestionnaireModule<
   // 5. Финальное окно
   manager.register({
     id: 'completed',
+    disableBackButton: true, // 👈 Кнопка Назад здесь автоматически не появится
     render: async () => {
       const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
       return {

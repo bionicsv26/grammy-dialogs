@@ -25,14 +25,11 @@ export function registerBranchingModule<
   // Клавиатура у всех трёх веток одинаковая
   const branchKeyboard = () =>
     new InlineKeyboard()
-      .text('⬅️ Назад к выбору', 'back_to_menu')
-      .row()
       .text('🏠 В главное меню', 'global_back_to_menu')
       .row()
       .text('✅ Завершить', 'finish_flow');
 
   const branchActions: Record<string, WindowActionHandler<BranchingState, BranchingWindowId>> = {
-    back_to_menu: async (ctx, manager) => { await manager.goTo(ctx, 'select_branch'); },
     finish_flow: async (ctx, manager) => { await manager.goTo(ctx, 'completed'); },
   };
 
