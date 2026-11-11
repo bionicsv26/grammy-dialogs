@@ -96,8 +96,29 @@ bot.use(async (ctx, next) => {
   }
 });
 
-// 4. DialogManager и модули
-const manager = new DialogManager<AppState, AppWindowId>(bot);
+// 4. DialogManager и модули с централизованным onError
+const manager = new DialogManager<AppState, AppWindowId>(bot, {
+  onError: async (error, ctx) => {
+    // Очищаем временные ошибки ввода в стейте, если они были
+    if (ctx.session?.data) {
+      delete ctx.session.data.error;
+    }
+
+    // Пытаемся вернуть пользователя в безопасное главное меню
+    try {
+      if (ctx.session) {
+        ctx.session.currentWindow = 'main_menu';
+        ctx.session.history = [];
+      }
+      await manager.show(ctx);
+    } catch (fallbackError) {
+      // Крайний случай: если рендер главного меню тоже упал, шлем текстовый fallback
+      logger.error(`Critical error during onError recovery`, { error: fallbackError });
+      await ctx.reply('⚠️ Произошла критическая ошибка. Введите /start для перезапуска бота.').catch(() => { });
+    }
+  },
+});
+
 bot.use(manager.middleware());
 
 registerQuestionnaireModule(manager);
