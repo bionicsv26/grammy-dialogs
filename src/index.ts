@@ -2,8 +2,14 @@ import { Bot, session } from 'grammy';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { Redis } from 'ioredis';
 import { RedisAdapter } from '@grammyjs/storage-redis';
+import {
+  DialogManager,
+  type DialogContext,
+  type DialogSession,
+} from './dialog-manager.js';
+import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
-import { DialogManager, type DialogContext } from './dialog-manager.js';
+import { logger } from './logger.js';
 import {
   registerQuestionnaireModule,
   type QuestionnaireState,
@@ -14,13 +20,13 @@ import {
   type BranchingState,
   type BranchingWindowId,
 } from './modules/branching.dialog.js';
-import { logger } from './logger.js';
 
-// 1. Объединяем состояние и ID окон со всех модулей
+// 1. Единые типы приложения
 export type AppState = QuestionnaireState & BranchingState;
 export type AppWindowId = QuestionnaireWindowId | BranchingWindowId;
 export type AppContext = DialogContext<AppState, AppWindowId>;
 
+// 2. Бот (с прокси в режиме разработки)
 const isDev = config.NODE_ENV === 'development';
 const clientConfig =
   isDev && config.HTTPS_PROXY
@@ -35,7 +41,7 @@ const clientConfig =
 
 const bot = new Bot<AppContext>(config.BOT_TOKEN, clientConfig);
 
-// 2. Redis и сессии
+// 3. Redis и сессии (первыми!)
 const redisClient = new Redis({
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
@@ -44,24 +50,26 @@ const redisClient = new Redis({
 
 const storage = new RedisAdapter({
   instance: redisClient,
-  ttl: 60 * 60 * 24, // Время жизни сессии в секундах (24 часа)
+  ttl: 60 * 60 * 24, // 24 часа
 });
 
 bot.use(
   session({
-    initial: (): AppContext['session'] => ({ data: {} }),
+    initial: (): DialogSession<AppState, AppWindowId> => ({
+      data: {} as DialogSession<AppState, AppWindowId>['data'],
+      lang: 'ru',
+    }),
     storage,
   })
 );
 
-// 3. Контекстное логирование (после сессий)
+// 4. Контекстное логирование (после сессий)
 bot.use(async (ctx, next) => {
   const updateType = ctx.update
     ? Object.keys(ctx.update).filter((k) => k !== 'update_id')[0]
     : 'unknown';
   const userId = ctx.from?.id;
   const username = ctx.from?.username || ctx.from?.first_name || 'Аноним';
-
   const currentWindow = ctx.session?.currentWindow || 'unknown';
   const callbackData = ctx.callbackQuery?.data;
   const userInputText = ctx.message?.text;
@@ -77,12 +85,10 @@ bot.use(async (ctx, next) => {
   const start = Date.now();
   try {
     await next();
-    const nextWindow = ctx.session?.currentWindow || 'unknown';
-
     logger.info(`✅ Успешно обработано`, {
       userId,
       fromWindow: currentWindow,
-      toWindow: nextWindow,
+      toWindow: ctx.session?.currentWindow || 'unknown',
       durationMs: Date.now() - start,
     });
   } catch (error) {
@@ -96,61 +102,60 @@ bot.use(async (ctx, next) => {
   }
 });
 
-// 4. DialogManager и модули с централизованным onError
-const manager = new DialogManager<AppState, AppWindowId>(bot, {
+// 5. DialogManager с i18n
+const manager = new DialogManager<AppState, AppWindowId, AppTranslationKeys>(bot, {
+  translations,
+  defaultLang: 'ru',
   onError: async (error, ctx) => {
-    // Очищаем временные ошибки ввода в стейте, если они были
-    if (ctx.session?.data) {
-      delete ctx.session.data.error;
-    }
-
-    // Пытаемся вернуть пользователя в безопасное главное меню
-    try {
-      if (ctx.session) {
-        ctx.session.currentWindow = 'main_menu';
-        ctx.session.history = [];
-      }
-      await manager.show(ctx);
-    } catch (fallbackError) {
-      // Крайний случай: если рендер главного меню тоже упал, шлем текстовый fallback
-      logger.error(`Critical error during onError recovery`, { error: fallbackError });
-      await ctx.reply('⚠️ Произошла критическая ошибка. Введите /start для перезапуска бота.').catch(() => { });
-    }
+    logger.error(`Unhandled error in dialog flow`, { error, userId: ctx.from?.id });
+    delete ctx.session.data.error;
+    ctx.session.currentWindow = 'main_menu';
+    ctx.session.history = [];
+    await manager.show(ctx);
   },
 });
 
-bot.use(manager.middleware());
-
+// 6. Модули диалогов
 registerQuestionnaireModule(manager);
 registerBranchingModule(manager);
 
-// Перехват /start с защитой от случайного сброса
+// 7. Команда /start (до middleware менеджера, чтобы команда не попадала в обработку ввода)
 bot.command('start', async (ctx) => {
   const current = ctx.session.currentWindow;
 
-  // Нет активного диалога или безопасное окно — сбрасываем в главное меню
   if (!current || current === 'main_menu' || current === 'completed') {
     await manager.start(ctx, 'main_menu');
     return;
   }
 
-  // Повторный /start на окне подтверждения перезапуска
   if (current === 'confirm_restart') {
     await manager.show(ctx);
     return;
   }
 
-  // Сохраняем предыдущее окно и переходим к подтверждению сброса
+  // goTo, а не start: start() обнуляет data и history
   ctx.session.data.previousWindow = current;
   await manager.goTo(ctx, 'confirm_restart');
 });
 
+// 8. Middleware менеджера диалогов
+bot.use(manager.middleware());
+
+// 9. Глобальный обработчик ошибок. Без него grammY останавливает polling
 bot.catch((err) => {
-  const ctx = err.ctx;
-  logger.error(`Глобальная ошибка бота на апдейте ${ctx.update.update_id}:`, {
+  logger.error(`Глобальная ошибка бота на апдейте ${err.ctx.update.update_id}:`, {
     error: err.error,
   });
 });
 
-logger.info('Бот успешно запущен!');
-bot.start();
+// 10. Запуск. Ошибка старта (например, нет сети до Telegram) попадёт в лог
+bot
+  .start({
+    onStart: (botInfo) => {
+      logger.info(`🤖 Bot @${botInfo.username} successfully started and ready for requests!`);
+    },
+  })
+  .catch((error) => {
+    logger.error(`Не удалось запустить бота`, { error });
+    process.exit(1);
+  });

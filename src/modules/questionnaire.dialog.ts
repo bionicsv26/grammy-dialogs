@@ -12,13 +12,14 @@ import {
   createInterestsSchema,
 } from '../schemas/questionnaire.schema.js';
 import { isUserAdmin } from '../utils/auth.js';
+import { escapeMarkdown } from '../utils/markdown.js';
+import type { AppTranslationKeys } from '../translations.js';
 
 // 1. Состояние и ID окон этого модуля
 export interface QuestionnaireState {
   name?: string;
   interests?: string[];
   returnTo?: QuestionnaireWindowId;
-  // Окно может принадлежать другому модулю, поэтому string
   previousWindow?: string;
   error?: string;
   validatedInput?: any;
@@ -32,35 +33,36 @@ export type QuestionnaireWindowId =
   | 'completed'
   | 'confirm_restart'
   | 'select_branch'
-  | 'admin_panel';
+  | 'admin_panel'
+  | 'settings_lang';
 
 type QManager = DialogManager<QuestionnaireState, QuestionnaireWindowId>;
 type QCtx = DialogContext<QuestionnaireState, QuestionnaireWindowId>;
 
-// Принимает любой менеджер, у которого состояние и набор ID шире, чем нужно модулю
 export function registerQuestionnaireModule<
   TState extends QuestionnaireState,
-  TId extends string
->(appManager: DialogManager<TState, TId>): void {
-  // Единственное место, где тип сужается до того, что нужно модулю
+  TId extends string,
+  TKeys extends string = string
+>(appManager: DialogManager<TState, TId, TKeys>): void {
   const manager = appManager as unknown as QManager;
 
   // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
-    render: async (ctx) => {
+    render: async (ctx, t) => {
       const keyboard = new InlineKeyboard()
-        .text('▶️ Начать анкету', 'to_form')
+        .text(t('btn_start_form'), 'to_form')
         .row()
-        .text('🔀 Выбор направления', 'proceed_to_branches');
+        .text(t('btn_select_branch'), 'proceed_to_branches')
+        .row()
+        .text(t('btn_settings_lang'), 'open_settings_lang');
 
-      // 🔐 Динамически добавляем кнопку админки для администраторов
       if (isUserAdmin(ctx.from?.id)) {
-        keyboard.row().text('🔐 Админ-панель', 'open_admin');
+        keyboard.row().text(t('btn_admin_panel'), 'open_admin');
       }
 
       return {
-        text: '*Добро пожаловать!*\n\nЭто демонстрация мини-библиотеки диалогов на TypeScript и grammY.',
+        text: t('main_menu_text'),
         keyboard,
       };
     },
@@ -74,6 +76,9 @@ export function registerQuestionnaireModule<
       open_admin: async (ctx, manager) => {
         await manager.goTo(ctx, 'admin_panel');
       },
+      open_settings_lang: async (ctx, manager) => {
+        await manager.goTo(ctx, 'settings_lang');
+      },
     },
   });
 
@@ -81,19 +86,19 @@ export function registerQuestionnaireModule<
   manager.register({
     id: 'ask_name',
     disableBackButton: true,
-    render: async (ctx) => {
+    render: async (ctx, t) => {
       const error = ctx.session.data.error;
       delete ctx.session.data.error;
 
       const isEditing = ctx.session.data.returnTo === 'summary';
       const backAction = isEditing ? 'cancel_edit_name' : 'main_menu';
-      const backLabel = isEditing ? '🔙 Отмена' : '🔙 Назад';
+      const backLabel = isEditing ? t('btn_cancel') : t('btn_back');
 
       const keyboard = new InlineKeyboard().text(backLabel, backAction);
 
-      let text = '*Шаг 1: Введите ваше имя*\n\n_Имя должно содержать от 2 до 50 символов._';
+      let text = t('ask_name_text');
       if (error) {
-        text = `❌ *${error}*\n\n` + text;
+        text = `❌ *${escapeMarkdown(error)}*\n\n` + text;
       }
 
       return { text, keyboard };
@@ -122,7 +127,7 @@ export function registerQuestionnaireModule<
     },
   });
 
-  // 3. Окно с выбором технологий (чекбоксы)
+  // 3. Окно с выбором технологий (переключатели)
   const toggleActions: Record<
     string,
     WindowActionHandler<QuestionnaireState, QuestionnaireWindowId>
@@ -152,7 +157,7 @@ export function registerQuestionnaireModule<
   manager.register({
     id: 'ask_interests',
     disableBackButton: true,
-    render: async (ctx) => {
+    render: async (ctx, t) => {
       if (!Array.isArray(ctx.session.data.interests)) {
         ctx.session.data.interests = [];
       }
@@ -164,29 +169,32 @@ export function registerQuestionnaireModule<
       AVAILABLE_INTERESTS.forEach((item) => {
         const isSelected = selected.includes(item.id);
         const icon = isSelected ? '✅' : '⬜️';
-        keyboard.text(`${icon} ${item.label}`, `toggle_${item.id}`).row();
+        const key = `tech_${item.id}` as AppTranslationKeys;
+        const translated = t(key);
+        const label = translated !== key ? translated : item.label;
+        keyboard.text(`${icon} ${label}`, `toggle_${item.id}`).row();
       });
 
-      const confirmLabel = isEditing ? '💾 Сохранить изменения' : '➡️ Подтвердить';
+      const confirmLabel = isEditing ? t('btn_save_changes') : t('btn_confirm');
       const backAction = isEditing ? 'cancel_edit_interests' : 'ask_name';
-      const backLabel = isEditing ? '🔙 Назад к предпросмотру' : '🔙 Назад';
+      const backLabel = isEditing ? t('btn_back_to_preview') : t('btn_back');
 
       keyboard.text(confirmLabel, 'confirm_interests').row();
       keyboard.text(backLabel, backAction);
 
       return {
-        text: '*Шаг 2: Выберите интересные вам технологии*\n\n_Отметьте от 1 до 4 вариантов._',
+        text: t('ask_interests_text'),
         keyboard,
       };
     },
     actions: {
       ...toggleActions,
-      confirm_interests: async (ctx, manager) => {
+      confirm_interests: async (ctx, manager, t) => {
         const selected = ctx.session.data.interests ?? [];
         const parseResult = createInterestsSchema(1, 4).safeParse(selected);
 
         if (!parseResult.success) {
-          const errorMessage = parseResult.error.issues[0]?.message || 'Неверный выбор';
+          const errorMessage = parseResult.error.issues[0]?.message || t('invalid_selection');
           await ctx
             .answerCallbackQuery({
               text: `⚠️ ${errorMessage}`,
@@ -215,31 +223,38 @@ export function registerQuestionnaireModule<
   manager.register({
     id: 'summary',
     guard: async (ctx) => {
-      // Если имя не заполнено — перенаправляем обратно на шаг ввода имени
       if (!ctx.session.data.name) {
-        return 'ask_name'; // Можно вернуть ID окна для редиректа
+        return 'ask_name';
       }
-      return true; // Доступ разрешен
+      return true;
     },
-    render: async (ctx) => {
-      const name = ctx.session.data.name || 'Аноним';
+    render: async (ctx, t) => {
+      const rawName = ctx.session.data.name || t('anonymous');
+      const name = escapeMarkdown(rawName);
       const interestIdsList = ctx.session.data.interests ?? [];
 
       const interestLabels = interestIdsList
-        .map((id) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
+        .map((id) => {
+          const key = `tech_${id}` as AppTranslationKeys;
+          const translated = t(key);
+          const fallback = AVAILABLE_INTERESTS.find((i) => i.id === id)?.label;
+          return translated !== key ? translated : escapeMarkdown(fallback || id);
+        })
         .filter(Boolean)
         .join(', ');
 
       const keyboard = new InlineKeyboard()
-        .text('✏️ Изменить имя', 'edit_name').row()
-        .text('✏️ Изменить технологии', 'edit_interests').row()
-        .text('✅ Всё верно, подтвердить', 'confirm_all').row()
-        .text('🔄 Начать заново', 'restart');
+        .text(t('btn_edit_name'), 'edit_name').row()
+        .text(t('btn_edit_interests'), 'edit_interests').row()
+        .text(t('btn_confirm_all'), 'confirm_all').row()
+        .text(t('btn_restart'), 'restart');
 
-      return {
-        text: `📋 *Предпросмотр анкеты*\n\nПроверьте данные:\n\n👤 *Имя:* ${name}\n💻 *Технологии:* ${interestLabels || 'Не выбрано'}`,
-        keyboard,
-      };
+      const text = t('summary_text', {
+        name,
+        interests: interestLabels || t('none_selected'),
+      });
+
+      return { text, keyboard };
     },
     actions: {
       edit_name: async (ctx, manager) => {
@@ -250,27 +265,34 @@ export function registerQuestionnaireModule<
         ctx.session.data.returnTo = 'summary';
         await manager.goTo(ctx, 'ask_interests');
       },
-      confirm_all: async (ctx, manager) => {
+      confirm_all: async (ctx, manager, t) => {
         const adminChatId = config.ADMIN_CHAT_ID;
 
         if (adminChatId) {
           try {
-            const name = ctx.session.data.name || 'Аноним';
+            const rawName = ctx.session.data.name || t('anonymous');
+            const name = escapeMarkdown(rawName);
             const interestIdsList = ctx.session.data.interests ?? [];
 
             const interestLabels = interestIdsList
-              .map((id) => AVAILABLE_INTERESTS.find((i) => i.id === id)?.label)
+              .map((id) => {
+                const key = `tech_${id}` as AppTranslationKeys;
+                const translated = t(key);
+                const fallback = AVAILABLE_INTERESTS.find((i) => i.id === id)?.label;
+                return translated !== key ? translated : escapeMarkdown(fallback || id);
+              })
               .filter(Boolean)
               .join(', ');
 
             const userId = ctx.from?.id;
-            const username = ctx.from?.username ? `@${ctx.from.username}` : 'скрыт';
+            const rawUsername = ctx.from?.username ? `@${ctx.from.username}` : t('hidden');
+            const username = escapeMarkdown(rawUsername);
 
             const adminMessage =
               `🚨 *Новая заполненная анкета!*\n\n` +
               `👤 *Имя:* ${name}\n` +
               `🔗 *Пользователь:* ${username} (ID: \`${userId}\`)\n` +
-              `💻 *Технологии:* ${interestLabels || 'Не выбрано'}\n` +
+              `💻 *Технологии:* ${interestLabels || t('none_selected')}\n` +
               `📅 *Дата:* ${new Date().toLocaleString('ru-RU')}`;
 
             await ctx.api.sendMessage(adminChatId, adminMessage, {
@@ -296,11 +318,11 @@ export function registerQuestionnaireModule<
   // 5. Финальное окно
   manager.register({
     id: 'completed',
-    disableBackButton: true, // 👈 Кнопка Назад здесь автоматически не появится
-    render: async () => {
-      const keyboard = new InlineKeyboard().text('🔄 Заполнить заново', 'restart');
+    disableBackButton: true,
+    render: async (_ctx, t) => {
+      const keyboard = new InlineKeyboard().text(t('btn_fill_again'), 'restart');
       return {
-        text: '🎉 *Спасибо! Ваша анкета успешно сохранена.*',
+        text: t('completed_text'),
         keyboard,
       };
     },
@@ -314,16 +336,16 @@ export function registerQuestionnaireModule<
   // 6. Окно подтверждения сброса при отправке /start
   manager.register({
     id: 'confirm_restart',
-    render: async () => {
+    render: async (_ctx, t) => {
       const keyboard = new InlineKeyboard()
-        .text('⚠️ Да, сбросить и начать заново', 'do_restart')
+        .text(t('btn_confirm_restart'), 'do_restart')
         .row()
-        .text('🔙 Продолжить заполнение', 'cancel_restart')
+        .text(t('btn_continue_filling'), 'cancel_restart')
         .row()
-        .text('🏠 В главное меню', 'global_back_to_menu');
+        .text(t('btn_to_main_menu'), 'global_back_to_menu');
 
       return {
-        text: '⚠️ *У вас есть незавершенная анкета!*\n\nЕсли вы начнете заново, все введенные данные будут потеряны. Вы уверены?',
+        text: t('confirm_restart_text'),
         keyboard,
       };
     },
@@ -339,25 +361,25 @@ export function registerQuestionnaireModule<
     },
   });
 
-  // 🛡️ Окно админ-панели с защитой
+  // 7. Окно админ-панели
   manager.register({
     id: 'admin_panel',
-    guard: async (ctx) => {
+    guard: async (ctx, _manager, t) => {
       if (!isUserAdmin(ctx.from?.id)) {
         await ctx
           .answerCallbackQuery({
-            text: '⚠️ У вас нет доступа к этому разделу',
+            text: t('no_admin_access'),
             show_alert: true,
           })
           .catch(() => { });
-        return 'main_menu'; // Возврат в главное меню при попытке несанкционированного доступа
+        return 'main_menu';
       }
       return true;
     },
-    render: async () => {
-      const keyboard = new InlineKeyboard().text('🏠 В главное меню', 'main_menu');
+    render: async (_ctx, t) => {
+      const keyboard = new InlineKeyboard().text(t('btn_to_main_menu'), 'main_menu');
       return {
-        text: '🔐 *Панель администратора*\n\nДобро пожаловать, босс! Здесь отображается управление системой.',
+        text: t('admin_panel_text'),
         keyboard,
       };
     },
@@ -365,6 +387,25 @@ export function registerQuestionnaireModule<
       main_menu: async (ctx, manager) => {
         await manager.goTo(ctx, 'main_menu');
       },
+    },
+  });
+
+  // Окно настроек языка
+  manager.register({
+    id: 'settings_lang',
+    render: async (ctx, t) => {
+      const currentLang = ctx.session.lang || 'ru';
+
+      const keyboard = new InlineKeyboard()
+        .text(currentLang === 'ru' ? '🇷🇺 Русский (актив.)' : '🇷🇺 Русский', 'lang_ru')
+        .text(currentLang === 'en' ? '🇬🇧 English (act.)' : '🇬🇧 English', 'lang_en')
+        .row()
+        .text(t('btn_to_main_menu'), 'global_back_to_menu');
+
+      return {
+        text: t('settings_lang_title'),
+        keyboard
+      };
     },
   });
 }

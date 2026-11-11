@@ -7,7 +7,8 @@ export interface DialogSession<
   TId extends string = string
 > {
   currentWindow?: TId;
-  history?: string[]; // 👈 Стек истории переходов
+  history?: string[]; // Стек истории переходов
+  lang?: string; // Язык пользователя (например, 'ru', 'en')
   data: TState & { error?: string; validatedInput?: any };
   messageId?: number;
 }
@@ -19,69 +20,140 @@ export type DialogContext<
   session: DialogSession<TState, TId>;
 };
 
+// 🌐 Функция перевода с поддержкой строгой типизации ключей (TKeys)
+export type TranslationFunction<TKeys extends string = string> = (
+  key: TKeys,
+  params?: Record<string, string | number>
+) => string;
+
 export type WindowRenderResult = {
   text: string;
   keyboard?: InlineKeyboard;
 };
 
-export type WindowActionHandler<TState extends Record<string, any>, TId extends string> = (
+export type WindowActionHandler<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> = (
   ctx: DialogContext<TState, TId>,
-  manager: DialogManager<TState, TId>
+  manager: DialogManager<TState, TId, TKeys>,
+  t: TranslationFunction<TKeys>
 ) => Promise<void> | void;
 
-export type WindowInputHandler<TState extends Record<string, any>, TId extends string> = (
+export type WindowInputHandler<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> = (
   ctx: DialogContext<TState, TId>,
-  manager: DialogManager<TState, TId>
+  manager: DialogManager<TState, TId, TKeys>,
+  t: TranslationFunction<TKeys>
 ) => Promise<void> | void;
 
 // 🛡️ Тип для защитных функций (Guards)
-export type WindowGuard<TState extends Record<string, any>, TId extends string> = (
+export type WindowGuard<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> = (
   ctx: DialogContext<TState, TId>,
-  manager: DialogManager<TState, TId>
+  manager: DialogManager<TState, TId, TKeys>,
+  t: TranslationFunction<TKeys>
 ) => Promise<boolean | TId> | boolean | TId;
 
 // 🪄 Тип для кастомного форматтера ввода
 export type WindowInputFormatter = (rawInput: string) => any;
 
-export interface WindowConfig<TState extends Record<string, any>, TId extends string> {
+export interface WindowConfig<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> {
   id: TId;
   render: (
-    ctx: DialogContext<TState, TId>
+    ctx: DialogContext<TState, TId>,
+    t: TranslationFunction<TKeys>
   ) => Promise<WindowRenderResult> | WindowRenderResult;
-  actions?: Record<string, WindowActionHandler<TState, TId>>;
-  onInput?: WindowInputHandler<TState, TId>;
+  actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
+  onInput?: WindowInputHandler<TState, TId, TKeys>;
   formatter?: WindowInputFormatter;
   inputSchema?: z.ZodType;
-  guard?: WindowGuard<TState, TId>;
+  guard?: WindowGuard<TState, TId, TKeys>;
   disableBackButton?: boolean;
 }
 
-// ⚙️ Опции конфигурации DialogManager
-export interface DialogManagerOptions<TState extends Record<string, any>, TId extends string> {
+// ⚙️ Опции конфигурации DialogManager (включая i18n)
+export interface DialogManagerOptions<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> {
   onError?: (
     error: unknown,
     ctx: DialogContext<TState, TId>,
-    manager: DialogManager<TState, TId>
+    manager: DialogManager<TState, TId, TKeys>
   ) => Promise<void> | void;
+  translations?: Record<string, Record<string, string>>;
+  defaultLang?: string;
 }
 
 export class DialogManager<
   TState extends Record<string, any> = Record<string, any>,
-  TId extends string = string
+  TId extends string = string,
+  TKeys extends string = string
 > {
-  private windows = new Map<TId, WindowConfig<TState, TId>>();
-  private errorHandler?: DialogManagerOptions<TState, TId>['onError'];
+  private windows = new Map<TId, WindowConfig<TState, TId, TKeys>>();
+  private errorHandler?: DialogManagerOptions<TState, TId, TKeys>['onError'];
+  private translations: Record<string, Record<string, string>>;
+  private defaultLang: string;
+
+  // Контексты, для которых ошибка уже обрабатывается (защита от рекурсии)
+  private handlingError = new WeakSet<object>();
 
   constructor(
     private bot: Bot<DialogContext<TState, TId>>,
-    options?: DialogManagerOptions<TState, TId>
+    options?: DialogManagerOptions<TState, TId, TKeys>
   ) {
     this.errorHandler = options?.onError;
+    this.translations = options?.translations ?? {};
+    this.defaultLang = options?.defaultLang ?? 'ru';
   }
 
-  register(window: WindowConfig<TState, TId>): this {
+  register(window: WindowConfig<TState, TId, TKeys>): this {
     this.windows.set(window.id, window);
     return this;
+  }
+
+  // 🌐 Получение функции перевода для текущего пользователя
+  public getTranslator(ctx: DialogContext<TState, TId>): TranslationFunction<TKeys> {
+    const lang = ctx.session.lang ?? this.defaultLang;
+
+    return (key: TKeys, params?: Record<string, string | number>): string => {
+      const text =
+        this.translations[lang]?.[key] ??
+        this.translations[this.defaultLang]?.[key];
+
+      if (text === undefined) {
+        logger.warn(`Translation key not found`, { lang, key });
+        return key;
+      }
+
+      let result = text;
+      if (params) {
+        for (const [paramKey, val] of Object.entries(params)) {
+          result = result.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(val));
+        }
+      }
+      return result;
+    };
+  }
+
+  // 🌐 Изменение языка и мгновенная перерисовка окна
+  async setLanguage(ctx: DialogContext<TState, TId>, lang: string): Promise<void> {
+    ctx.session.lang = lang;
+    logger.info(`User changed language`, { userId: ctx.from?.id, lang });
+    await this.show(ctx);
   }
 
   // 🪄 Хелпер для добавления кнопки «Назад» к любой инлайн-клавиатуре
@@ -97,19 +169,27 @@ export class DialogManager<
       error,
     });
 
-    if (this.errorHandler) {
-      try {
-        await this.errorHandler(error, ctx, this);
-        return;
-      } catch (handlerError) {
-        logger.error(`Error occurred inside custom onError handler`, { handlerError });
-      }
-    }
+    // Защита от рекурсии: ошибка внутри обработки ошибки не должна запускать её снова
+    if (this.handlingError.has(ctx)) return;
+    this.handlingError.add(ctx);
 
-    // Дефолтный фоллбек, если кастомный onError не передан
     try {
-      await ctx.reply('⚠️ Что-то пошло не так. Попробуйте позже или введите /start.').catch(() => { });
-    } catch { }
+      if (this.errorHandler) {
+        try {
+          await this.errorHandler(error, ctx, this);
+          return;
+        } catch (handlerError) {
+          logger.error(`Error occurred inside custom onError handler`, { handlerError });
+        }
+      }
+
+      // Дефолтный фоллбек, если кастомный onError не передан или упал
+      await ctx
+        .reply('⚠️ Что-то пошло не так. Попробуйте позже или введите /start.')
+        .catch(() => { });
+    } finally {
+      this.handlingError.delete(ctx);
+    }
   }
 
   async start(
@@ -138,7 +218,10 @@ export class DialogManager<
   async goTo(ctx: DialogContext<TState, TId>, windowId: TId): Promise<void> {
     try {
       if (!this.windows.has(windowId)) {
-        logger.error(`Attempted to navigate to unregistered window`, { userId: ctx.from?.id, targetWindow: windowId });
+        logger.error(`Attempted to navigate to unregistered window`, {
+          userId: ctx.from?.id,
+          targetWindow: windowId,
+        });
         throw new Error(`Window with id "${windowId}" is not registered.`);
       }
 
@@ -150,7 +233,10 @@ export class DialogManager<
         ctx.session.history = [];
       }
 
-      if (currentWindow) {
+      // Переход в главное меню начинает навигацию заново, старая история не нужна
+      if (windowId === 'main_menu') {
+        ctx.session.history = [];
+      } else if (currentWindow) {
         ctx.session.history.push(currentWindow);
       }
 
@@ -206,26 +292,33 @@ export class DialogManager<
         return;
       }
 
+      const t = this.getTranslator(ctx);
+
       // 🛡️ Проверяем Guard перед рендером
       if (window.guard) {
-        const guardResult = await window.guard(ctx, this);
+        const guardResult = await window.guard(ctx, this, t);
         if (guardResult === false) {
           logger.warn(`Window guard blocked access (render halted)`, { userId, windowId });
           return;
         }
         if (typeof guardResult === 'string' && guardResult !== windowId) {
-          logger.info(`Window guard redirected user`, { userId, fromWindow: windowId, toWindow: guardResult });
+          logger.info(`Window guard redirected user`, {
+            userId,
+            fromWindow: windowId,
+            toWindow: guardResult,
+          });
           await this.goTo(ctx, guardResult as TId);
           return;
         }
       }
 
-      const rendered = await window.render(ctx);
+      const rendered = await window.render(ctx, t);
       const text = rendered.text;
       let keyboard = rendered.keyboard;
 
-      // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений
-      const isMainOrCompleted = windowId === 'main_menu' || windowId === 'completed' || windowId === 'confirm_restart';
+      // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений и локализации
+      const isMainOrCompleted =
+        windowId === 'main_menu' || windowId === 'completed' || windowId === 'confirm_restart';
       if (
         keyboard &&
         ctx.session.history &&
@@ -233,7 +326,10 @@ export class DialogManager<
         !isMainOrCompleted &&
         !window.disableBackButton
       ) {
-        keyboard = DialogManager.appendBackButton(keyboard);
+        keyboard = DialogManager.appendBackButton(
+          keyboard,
+          (t as TranslationFunction)('btn_back')
+        );
       }
 
       const otherOptions: { parse_mode: 'Markdown'; reply_markup?: InlineKeyboard } = {
@@ -284,15 +380,25 @@ export class DialogManager<
           return next();
         }
 
+        const t = this.getTranslator(ctx);
+
         // 🛡️ Проверяем Guard на уровне middleware перед обработкой кликов или ввода
         if (window.guard) {
-          const guardResult = await window.guard(ctx, this);
+          const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
             logger.warn(`Window guard blocked middleware action`, { userId, windowId });
+            // Снимаем «часики» с нажатой кнопки
+            if (ctx.callbackQuery) {
+              await ctx.answerCallbackQuery().catch(() => { });
+            }
             return;
           }
           if (typeof guardResult === 'string' && guardResult !== windowId) {
-            logger.info(`Window guard redirected user in middleware`, { userId, fromWindow: windowId, toWindow: guardResult });
+            logger.info(`Window guard redirected user in middleware`, {
+              userId,
+              fromWindow: windowId,
+              toWindow: guardResult,
+            });
             await this.goTo(ctx, guardResult as TId);
             return;
           }
@@ -303,6 +409,23 @@ export class DialogManager<
           const actionKey = ctx.callbackQuery.data;
 
           logger.debug(`User triggered action`, { userId, windowId, actionKey });
+
+          // 🌐 Перехват смены языка (формат: lang_ru, lang_en и т.д.)
+          if (actionKey.startsWith('lang_')) {
+            const newLang = actionKey.replace('lang_', '');
+            try {
+              await this.setLanguage(ctx, newLang);
+            } finally {
+              if (!ctx.callbackQuery.inline_message_id) {
+                await ctx
+                  .answerCallbackQuery({
+                    text: (this.getTranslator(ctx) as TranslationFunction)('language_changed'),
+                  })
+                  .catch(() => { });
+              }
+            }
+            return;
+          }
 
           if (actionKey === 'global_back_to_menu') {
             try {
@@ -330,12 +453,14 @@ export class DialogManager<
 
           if (!actionHandler) {
             logger.warn(`Action handler not found`, { userId, windowId, actionKey });
-            await ctx.answerCallbackQuery({ text: 'Действие недоступно' }).catch(() => { });
+            await ctx
+              .answerCallbackQuery({ text: (t as TranslationFunction)('action_not_available') })
+              .catch(() => { });
             return next();
           }
 
           try {
-            await actionHandler(ctx, this);
+            await actionHandler(ctx, this, t);
           } catch (error) {
             logger.error(`Error occurred while executing action handler`, {
               userId,
@@ -353,18 +478,28 @@ export class DialogManager<
         }
 
         // 2. Обработка обычного текстового ввода с форматтером и валидацией через Zod
-        if (ctx.message && ctx.message.text && (window.inputSchema || window.onInput || window.formatter)) {
+        if (
+          ctx.message &&
+          ctx.message.text &&
+          (window.inputSchema || window.onInput || window.formatter)
+        ) {
+          // Команды (/start и т.д.) не считаются вводом, отдаём их дальше
+          if (ctx.message.text.startsWith('/')) {
+            return next();
+          }
+
           await ctx.deleteMessage().catch(() => { });
 
           const rawInput = ctx.message.text.trim();
-
           const formattedInput = window.formatter ? window.formatter(rawInput) : rawInput;
 
           if (window.inputSchema) {
             const parseResult = window.inputSchema.safeParse(formattedInput);
 
             if (!parseResult.success) {
-              const firstError = parseResult.error.issues[0]?.message || 'Неверный формат данных';
+              const firstError =
+                parseResult.error.issues[0]?.message ||
+                (t as TranslationFunction)('invalid_format');
 
               logger.warn(`Window input validation failed`, {
                 userId,
@@ -386,7 +521,7 @@ export class DialogManager<
 
           if (window.onInput) {
             try {
-              await window.onInput(ctx, this);
+              await window.onInput(ctx, this, t);
             } catch (error) {
               logger.error(`Error occurred while executing onInput handler`, {
                 userId,

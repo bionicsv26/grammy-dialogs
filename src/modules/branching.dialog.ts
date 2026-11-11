@@ -18,16 +18,17 @@ type BManager = DialogManager<BranchingState, BranchingWindowId>;
 
 export function registerBranchingModule<
   TState extends BranchingState,
-  TId extends string
->(appManager: DialogManager<TState, TId>): void {
+  TId extends string,
+  TKeys extends string = string
+>(appManager: DialogManager<TState, TId, TKeys>): void {
   const manager = appManager as unknown as BManager;
 
-  // Клавиатура у всех трёх веток одинаковая
-  const branchKeyboard = () =>
+  // Универсальная клавиатура для веток с учетом i18n
+  const branchKeyboard = (t: (key: string) => string) =>
     new InlineKeyboard()
-      .text('🏠 В главное меню', 'global_back_to_menu')
+      .text(t('btn_to_main_menu'), 'global_back_to_menu')
       .row()
-      .text('✅ Завершить', 'finish_flow');
+      .text(t('btn_finish'), 'finish_flow');
 
   const branchActions: Record<string, WindowActionHandler<BranchingState, BranchingWindowId>> = {
     finish_flow: async (ctx, manager) => { await manager.goTo(ctx, 'completed'); },
@@ -36,16 +37,16 @@ export function registerBranchingModule<
   // 1. Главное окно развилки
   manager.register({
     id: 'select_branch',
-    render: async () => {
+    render: async (_ctx, t) => {
       const keyboard = new InlineKeyboard()
-        .text('🚀 Вариант 1: Технический стек', 'branch_tech')
+        .text(t('branch_tech_btn'), 'branch_tech')
         .row()
-        .text('🎨 Вариант 2: Дизайн и UI/UX', 'branch_design')
+        .text(t('branch_design_btn'), 'branch_design')
         .row()
-        .text('📊 Вариант 3: Аналитика и Бизнес', 'branch_business');
+        .text(t('branch_business_btn'), 'branch_business');
 
       return {
-        text: '📂 *Меню выбора ветки*\n\nВыберите направление, по которому хотите продолжить работу:',
+        text: t('select_branch_text'),
         keyboard,
       };
     },
@@ -68,9 +69,9 @@ export function registerBranchingModule<
   // 2. Ветка 1: Техническая
   manager.register({
     id: 'window_tech_step',
-    render: async () => ({
-      text: '⚙️ *Техническая ветка*\n\nЗдесь настраивается архитектура, бэкенд на NestJS, базы данных и Docker.',
-      keyboard: branchKeyboard(),
+    render: async (_ctx, t) => ({
+      text: t('tech_step_text'),
+      keyboard: branchKeyboard(t),
     }),
     actions: branchActions,
   });
@@ -78,9 +79,9 @@ export function registerBranchingModule<
   // 3. Ветка 2: Дизайн
   manager.register({
     id: 'window_design_step',
-    render: async () => ({
-      text: '🎨 *Дизайн-ветка*\n\nЗдесь прорабатываются макеты в Figma, цвета, шрифты и пользовательский опыт.',
-      keyboard: branchKeyboard(),
+    render: async (_ctx, t) => ({
+      text: t('design_step_text'),
+      keyboard: branchKeyboard(t),
     }),
     actions: branchActions,
   });
@@ -88,9 +89,9 @@ export function registerBranchingModule<
   // 4. Ветка 3: Бизнес
   manager.register({
     id: 'window_business_step',
-    render: async () => ({
-      text: '📊 *Бизнес-ветка*\n\nЗдесь анализируются метрики, юнит-экономика, гипотезы и монетизация.',
-      keyboard: branchKeyboard(),
+    render: async (_ctx, t) => ({
+      text: t('business_step_text'),
+      keyboard: branchKeyboard(t),
     }),
     actions: branchActions,
   });
