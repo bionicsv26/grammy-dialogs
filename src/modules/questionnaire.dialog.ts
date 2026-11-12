@@ -23,6 +23,7 @@ export interface QuestionnaireState {
   previousWindow?: string;
   error?: string;
   validatedInput?: any;
+  broadcastText?: string;
 }
 
 export type QuestionnaireWindowId =
@@ -34,6 +35,8 @@ export type QuestionnaireWindowId =
   | 'confirm_restart'
   | 'select_branch'
   | 'admin_panel'
+  | 'admin_stats'
+  | 'admin_broadcast'
   | 'settings_lang';
 
 type QManager = DialogManager<QuestionnaireState, QuestionnaireWindowId>;
@@ -377,7 +380,10 @@ export function registerQuestionnaireModule<
       return true;
     },
     render: async (_ctx, t) => {
-      const keyboard = new InlineKeyboard().text(t('btn_to_main_menu'), 'main_menu');
+      const keyboard = new InlineKeyboard()
+        .text(t('btn_stats'), 'open_stats').row()
+        .text(t('btn_broadcast'), 'open_broadcast').row()
+        .text(t('btn_to_main_menu'), 'main_menu');
       return {
         text: t('admin_panel_text'),
         keyboard,
@@ -386,6 +392,61 @@ export function registerQuestionnaireModule<
     actions: {
       main_menu: async (ctx, manager) => {
         await manager.goTo(ctx, 'main_menu');
+      },
+      open_stats: async (ctx, manager) => {
+        await manager.goTo(ctx, 'admin_stats');
+      },
+      open_broadcast: async (ctx, manager) => {
+        await manager.goTo(ctx, 'admin_broadcast');
+      },
+    },
+  });
+
+  // Окно статистики
+  manager.register({
+    id: 'admin_stats',
+    render: async (_ctx, t) => {
+      const keyboard = new InlineKeyboard().text(t('btn_back'), 'back_to_admin');
+      return {
+        text: t('admin_stats_title'),
+        keyboard,
+      };
+    },
+    actions: {
+      back_to_admin: async (ctx, manager) => {
+        await manager.goTo(ctx, 'admin_panel');
+      },
+    },
+  });
+
+  // Окно ввода рассылки
+  manager.register({
+    id: 'admin_broadcast',
+    disableBackButton: true,
+    render: async (_ctx, t) => {
+      const keyboard = new InlineKeyboard().text(t('btn_cancel_broadcast'), 'cancel_broadcast');
+      return {
+        text: t('admin_broadcast_title'),
+        keyboard,
+      };
+    },
+    // Перехватываем обычный текстовый ввод от администратора
+    onInput: async (ctx, manager, t) => {
+      const textToBroadcast = ctx.msg?.text;
+      if (!textToBroadcast) return;
+
+      // Здесь в будущем можно пройтись по списку всех ID пользователей из БД/Redis
+      // И выполнить ctx.api.sendMessage(userId, textToBroadcast)
+      const simulatedCount = 1;
+
+      await ctx.reply(t('broadcast_success', { count: String(simulatedCount) }));
+      delete ctx.session.data.broadcastText;
+      await manager.goTo(ctx, 'admin_panel');
+    },
+    actions: {
+      cancel_broadcast: async (ctx, manager) => {
+        delete ctx.session.data.broadcastText;
+        await manager.goTo(ctx, 'admin_panel');
       },
     },
   });

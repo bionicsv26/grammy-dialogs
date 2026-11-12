@@ -53,6 +53,13 @@ export const translations = {
     // Админка
     admin_panel_text: '🔐 *Панель администратора*\n\nДобро пожаловать, босс! Здесь отображается управление системой.',
     no_admin_access: '⚠️ У вас нет доступа к этому разделу',
+    admin_stats_title: '📊 *Статистика системы*\n\n👥 Всего пользователей: *1*\n📝 Заполнено анкет: *1*\n⚡️ Статус Redis: *Активен*',
+    admin_broadcast_title: '📢 *Рассылка сообщений*\n\nОтправьте текст сообщения, которое хотите разослать всем пользователям:',
+    btn_stats: '📈 Статистика',
+    btn_broadcast: '📢 Сделать рассылку',
+    btn_cancel_broadcast: '❌ Отменить рассылку',
+    broadcast_success: '✅ Рассылка успешно завершена! Отправлено: {count}',
+    broadcast_cancelled: '🚫 Рассылка отменена.',
 
     // Модуль веток (Branching)
     select_branch_text: '📂 *Меню выбора ветки*\n\nВыберите направление, по которому хотите продолжить работу:',
@@ -118,6 +125,13 @@ export const translations = {
     // Admin Panel
     admin_panel_text: '🔐 *Admin Panel*\n\nWelcome back, boss! System controls are listed here.',
     no_admin_access: '⚠️ You do not have access to this section',
+    admin_stats_title: '📊 *System Statistics*\n\n👥 Total Users: *1*\n📝 Completed Questionnaires: *1*\n⚡️ Redis Status: *Active*',
+    admin_broadcast_title: '📢 *Broadcast Messages*\n\nSend the text message you want to broadcast to all users:',
+    btn_stats: '📈 Statistics',
+    btn_broadcast: '📢 Create Broadcast',
+    btn_cancel_broadcast: '❌ Cancel Broadcast',
+    broadcast_success: '✅ Broadcast completed successfully! Sent to: {count}',
+    broadcast_cancelled: '🚫 Broadcast cancelled.',
 
     // Branching Module
     select_branch_text: '📂 *Branch Selection Menu*\n\nChoose the domain you want to proceed with:',
