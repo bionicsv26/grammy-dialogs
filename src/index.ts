@@ -11,12 +11,12 @@ import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import {
-  registerQuestionnaireModule,
+  createQuestionnaireWindows,
   type QuestionnaireState,
   type QuestionnaireWindowId,
 } from './modules/questionnaire.dialog.js';
 import {
-  registerBranchingModule,
+  createBranchingWindows,
   type BranchingState,
   type BranchingWindowId,
 } from './modules/branching.dialog.js';
@@ -24,7 +24,7 @@ import {
 // 1. Единые типы приложения
 export type AppState = QuestionnaireState & BranchingState;
 export type AppWindowId = QuestionnaireWindowId | BranchingWindowId;
-export type AppContext = DialogContext<AppState, AppWindowId>;
+export type AppContext = DialogContext<AppState>;
 
 // 2. Бот (с прокси в режиме разработки)
 const isDev = config.NODE_ENV === 'development';
@@ -55,8 +55,8 @@ const storage = new RedisAdapter({
 
 bot.use(
   session({
-    initial: (): DialogSession<AppState, AppWindowId> => ({
-      data: {} as DialogSession<AppState, AppWindowId>['data'],
+    initial: (): DialogSession<AppState> => ({
+      data: {} as DialogSession<AppState>['data'],
       lang: 'ru',
     }),
     storage,
@@ -116,11 +116,12 @@ const manager = new DialogManager<AppState, AppWindowId, AppTranslationKeys>(bot
   },
 });
 
-// 6. Модули диалогов
-registerQuestionnaireModule(manager);
-registerBranchingModule(manager);
+// 6. Окна диалогов (типобезопасная композиция, без кастов менеджера)
+manager
+  .registerAll(createQuestionnaireWindows<AppState>())
+  .registerAll(createBranchingWindows<AppState>());
 
-// 7. Команда /start (до middleware менеджера, чтобы команда не попадала в обработку ввода)
+// 7. Команда /start (до middleware менеджера)
 bot.command('start', async (ctx) => {
   const current = ctx.session.currentWindow;
 
@@ -142,14 +143,14 @@ bot.command('start', async (ctx) => {
 // 8. Middleware менеджера диалогов
 bot.use(manager.middleware());
 
-// 9. Глобальный обработчик ошибок. Без него grammY останавливает polling
+// 9. Глобальный обработчик ошибок
 bot.catch((err) => {
   logger.error(`Глобальная ошибка бота на апдейте ${err.ctx.update.update_id}:`, {
     error: err.error,
   });
 });
 
-// 10. Запуск. Ошибка старта (например, нет сети до Telegram) попадёт в лог
+// 10. Запуск
 bot
   .start({
     onStart: (botInfo) => {

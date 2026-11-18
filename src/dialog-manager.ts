@@ -4,24 +4,24 @@ import { logger } from './logger.js';
 import { isMessageNotModified } from './utils/telegram-errors.js';
 
 export interface DialogSession<
-  TState extends Record<string, any> = Record<string, any>,
-  TId extends string = string
+  TState extends Record<string, any> = Record<string, any>
 > {
-  currentWindow?: TId;
-  history?: string[]; // Стек истории переходов
-  lang?: string; // Язык пользователя (например, 'ru', 'en')
+  // Осознанно string, а не TId: сессия приходит из Redis как JSON,
+  // литеральный тип здесь не гарантирован runtime. TId-безопасность
+  // живёт на границах методов (goTo/start/register).
+  currentWindow?: string;
+  history?: string[];
+  lang?: string;
   data: TState & { error?: string; validatedInput?: any };
   messageId?: number;
 }
 
 export type DialogContext<
-  TState extends Record<string, any> = Record<string, any>,
-  TId extends string = string
+  TState extends Record<string, any> = Record<string, any>
 > = Context & {
-  session: DialogSession<TState, TId>;
+  session: DialogSession<TState>;
 };
 
-// 🌐 Функция перевода с поддержкой строгой типизации ключей (TKeys)
 export type TranslationFunction<TKeys extends string = string> = (
   key: TKeys,
   params?: Record<string, string | number>
@@ -37,7 +37,7 @@ export type WindowActionHandler<
   TId extends string,
   TKeys extends string = string
 > = (
-  ctx: DialogContext<TState, TId>,
+  ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
   t: TranslationFunction<TKeys>
 ) => Promise<void> | void;
@@ -47,23 +47,21 @@ export type WindowInputHandler<
   TId extends string,
   TKeys extends string = string
 > = (
-  ctx: DialogContext<TState, TId>,
+  ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
   t: TranslationFunction<TKeys>
 ) => Promise<void> | void;
 
-// 🛡️ Тип для защитных функций (Guards)
 export type WindowGuard<
   TState extends Record<string, any>,
   TId extends string,
   TKeys extends string = string
 > = (
-  ctx: DialogContext<TState, TId>,
+  ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
   t: TranslationFunction<TKeys>
 ) => Promise<boolean | TId> | boolean | TId;
 
-// 🪄 Тип для кастомного форматтера ввода
 export type WindowInputFormatter = (rawInput: string) => any;
 
 export interface WindowConfig<
@@ -73,7 +71,7 @@ export interface WindowConfig<
 > {
   id: TId;
   render: (
-    ctx: DialogContext<TState, TId>,
+    ctx: DialogContext<TState>,
     t: TranslationFunction<TKeys>
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
@@ -84,7 +82,6 @@ export interface WindowConfig<
   disableBackButton?: boolean;
 }
 
-// ⚙️ Опции конфигурации DialogManager (включая i18n)
 export interface DialogManagerOptions<
   TState extends Record<string, any>,
   TId extends string = string,
@@ -92,7 +89,7 @@ export interface DialogManagerOptions<
 > {
   onError?: (
     error: unknown,
-    ctx: DialogContext<TState, TId>,
+    ctx: DialogContext<TState>,
     manager: DialogManager<TState, TId, TKeys>
   ) => Promise<void> | void;
   translations?: Record<string, Record<string, string>>;
@@ -107,24 +104,46 @@ export interface DialogManagerOptions<
   rootWindowId?: TId;
 }
 
+/** Внутреннее стирание дженериков на границе хранения. */
+type AnyWindowConfig = WindowConfig<any, any, any>;
+type AnyErrorHandler = (
+  error: unknown,
+  ctx: DialogContext<any>,
+  manager: DialogManager<any, any, any>
+) => Promise<void> | void;
+
+/** Хелпер для определения окон модуля с контекстной типизацией хендлеров. */
+export function defineWindows<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+>(
+  windows: readonly WindowConfig<TState, TId, TKeys>[]
+): readonly WindowConfig<TState, TId, TKeys>[] {
+  return windows;
+}
+
 export class DialogManager<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
   TKeys extends string = string
 > {
-  private windows = new Map<TId, WindowConfig<TState, TId, TKeys>>();
-  private errorHandler?: DialogManagerOptions<TState, TId, TKeys>['onError'];
+  // Все приватные поля намеренно не зависят от TState/TId/TKeys,
+  // чтобы разные инстанциации класса были структурно совместимы
+  // (иначе приватные поля делают класс номинальным и инвариантным).
+  private windows = new Map<string, AnyWindowConfig>();
+  private errorHandler?: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
   private defaultLang: string;
-
-  // Контексты, для которых ошибка уже обрабатывается (защита от рекурсии)
+  private rootWindowId?: string | undefined;
   private handlingError = new WeakSet<object>();
-  private rootWindowId?: TId | undefined;
+  private bot: Bot<any>;
 
   constructor(
-    private bot: Bot<DialogContext<TState, TId>>,
+    bot: Bot<DialogContext<TState>>,
     options?: DialogManagerOptions<TState, TId, TKeys>
   ) {
+    this.bot = bot;
     this.errorHandler = options?.onError;
     this.translations = options?.translations ?? {};
     this.defaultLang = options?.defaultLang ?? 'ru';
@@ -132,12 +151,16 @@ export class DialogManager<
   }
 
   register(window: WindowConfig<TState, TId, TKeys>): this {
-    this.windows.set(window.id, window);
+    this.windows.set(window.id, window as AnyWindowConfig);
     return this;
   }
 
-  // 🌐 Получение функции перевода для текущего пользователя
-  public getTranslator(ctx: DialogContext<TState, TId>): TranslationFunction<TKeys> {
+  registerAll(windows: readonly WindowConfig<TState, TId, TKeys>[]): this {
+    for (const w of windows) this.register(w);
+    return this;
+  }
+
+  public getTranslator(ctx: DialogContext<TState>): TranslationFunction<TKeys> {
     const lang = ctx.session.lang ?? this.defaultLang;
 
     return (key: TKeys, params?: Record<string, string | number>): string => {
@@ -153,9 +176,9 @@ export class DialogManager<
       if (!params) return text;
 
       // Один проход по исходному шаблону:
-      // - функция-замена вставляет значение ЛИТЕРАЛЬНО (никаких $-паттернов);
+      // - функция-замена вставляет значение литерально (никаких $-паттернов);
       // - вставленные значения не пересканируются (нет каскада);
-      // - паттерн обобщённый, RegExp из ключей не строится (нет инъекции/исключений).
+      // - паттерн обобщённый, RegExp из ключей не строится.
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
           ? String(params[name])
@@ -164,22 +187,24 @@ export class DialogManager<
     };
   }
 
-  // 🌐 Изменение языка и мгновенная перерисовка окна
-  async setLanguage(ctx: DialogContext<TState, TId>, lang: string): Promise<void> {
+  async setLanguage(ctx: DialogContext<TState>, lang: string): Promise<void> {
     ctx.session.lang = lang;
     logger.info(`User changed language`, { userId: ctx.from?.id, lang });
     await this.show(ctx);
   }
 
-  // 🪄 Хелпер для добавления кнопки «Назад» к любой инлайн-клавиатуре
-  static appendBackButton(keyboard: InlineKeyboard, text: string = '⬅️ Назад'): InlineKeyboard {
+  // Не мутирует переданную клавиатуру: клонируем и добавляем «Назад».
+  static appendBackButton(
+    keyboard: InlineKeyboard,
+    text: string = '⬅️ Назад'
+  ): InlineKeyboard {
     const result = keyboard.clone();
     const rows = result.inline_keyboard;
     const lastRow = rows[rows.length - 1];
 
     if (lastRow && lastRow.length === 0) {
-      // Пустая клавиатура (new InlineKeyboard() = [[]]) — заполняем уже
-      // существующий ряд, чтобы не отправлять в разметке пустой ряд.
+      // Пустая клавиатура (new InlineKeyboard() = [[]]) — заполняем
+      // существующий ряд, чтобы не отправлять пустой ряд в разметке.
       result.text(text, 'global_back');
     } else {
       result.row().text(text, 'global_back');
@@ -187,15 +212,13 @@ export class DialogManager<
     return result;
   }
 
-  // 🛡️ Централизованный обработчик ошибок
-  private async handleError(error: unknown, ctx: DialogContext<TState, TId>): Promise<void> {
+  private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
     logger.error(`DialogManager execution error`, {
       userId: ctx.from?.id,
       currentWindow: ctx.session.currentWindow,
       error,
     });
 
-    // Защита от рекурсии: ошибка внутри обработки ошибки не должна запускать её снова
     if (this.handlingError.has(ctx)) return;
     this.handlingError.add(ctx);
 
@@ -209,7 +232,6 @@ export class DialogManager<
         }
       }
 
-      // Дефолтный фоллбек, если кастомный onError не передан или упал
       await ctx
         .reply('⚠️ Что-то пошло не так. Попробуйте позже или введите /start.')
         .catch(() => { });
@@ -219,7 +241,7 @@ export class DialogManager<
   }
 
   async start(
-    ctx: DialogContext<TState, TId>,
+    ctx: DialogContext<TState>,
     windowId: TId,
     initialData: Partial<TState> = {}
   ): Promise<void> {
@@ -231,17 +253,16 @@ export class DialogManager<
       logger.info(`Starting dialog at window`, { userId: ctx.from?.id, windowId });
 
       ctx.session.currentWindow = windowId;
-      ctx.session.data = { ...initialData } as DialogSession<TState, TId>['data'];
+      ctx.session.data = { ...initialData } as DialogSession<TState>['data'];
       delete ctx.session.messageId;
-      ctx.session.history = []; // Очищаем историю при старте
+      ctx.session.history = [];
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
     }
   }
 
-  // 🧭 Переход с сохранением истории
-  async goTo(ctx: DialogContext<TState, TId>, windowId: TId): Promise<void> {
+  async goTo(ctx: DialogContext<TState>, windowId: TId): Promise<void> {
     try {
       if (!this.windows.has(windowId)) {
         logger.error(`Attempted to navigate to unregistered window`, {
@@ -259,8 +280,8 @@ export class DialogManager<
         ctx.session.history = [];
       }
 
-      // Переход в корень навигации начинает её заново — старая история не нужна.
-      // Если rootWindowId не задан, сравнение всегда false (windowId — строка).
+      // Переход в корень навигации начинает её заново.
+      // Если rootWindowId не задан, сравнение всегда false.
       if (windowId === this.rootWindowId) {
         ctx.session.history = [];
       } else if (currentWindow) {
@@ -281,8 +302,7 @@ export class DialogManager<
     }
   }
 
-  // ⬅️ Возврат на предыдущее окно из стека
-  async goBack(ctx: DialogContext<TState, TId>): Promise<void> {
+  async goBack(ctx: DialogContext<TState>): Promise<void> {
     try {
       if (!ctx.session.history || ctx.session.history.length === 0) {
         logger.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
@@ -304,7 +324,7 @@ export class DialogManager<
     }
   }
 
-  async show(ctx: DialogContext<TState, TId>): Promise<void> {
+  async show(ctx: DialogContext<TState>): Promise<void> {
     try {
       const userId = ctx.from?.id;
       const windowId = ctx.session.currentWindow;
@@ -313,7 +333,9 @@ export class DialogManager<
         return;
       }
 
-      const window = this.windows.get(windowId);
+      const window = this.windows.get(windowId) as
+        | WindowConfig<TState, TId, TKeys>
+        | undefined;
       if (!window) {
         logger.error(`Window not found in registry during show`, { userId, windowId });
         return;
@@ -321,7 +343,6 @@ export class DialogManager<
 
       const t = this.getTranslator(ctx);
 
-      // 🛡️ Проверяем Guard перед рендером
       if (window.guard) {
         const guardResult = await window.guard(ctx, this, t);
         if (guardResult === false) {
@@ -334,7 +355,7 @@ export class DialogManager<
             fromWindow: windowId,
             toWindow: guardResult,
           });
-          await this.goTo(ctx, guardResult as TId);
+          await this.goTo(ctx, guardResult);
           return;
         }
       }
@@ -343,7 +364,6 @@ export class DialogManager<
       const text = rendered.text;
       let keyboard = rendered.keyboard;
 
-      // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений и локализации
       const shouldShowBack =
         !!ctx.session.history?.length &&
         !window.disableBackButton;
@@ -372,15 +392,11 @@ export class DialogManager<
           );
           return;
         } catch (error) {
-          // Контент уже актуален. Ничего не делаем и НЕ трогаем messageId —
-          // следующие рендеры должны редактировать это же сообщение.
+          // Контент уже актуален — ничего не делаем и НЕ трогаем messageId.
           if (isMessageNotModified(error)) {
             logger.debug(`Message is already up to date`, { userId, windowId });
             return;
           }
-
-          // Реальная потеря сообщения (удалено, не найдено, нельзя редактировать) —
-          // отправляем новое, как и раньше.
           logger.debug(`Failed to edit message, sending a new one`, { userId, error });
           delete ctx.session.messageId;
         }
@@ -397,7 +413,7 @@ export class DialogManager<
 
   middleware() {
     return async (
-      ctx: DialogContext<TState, TId>,
+      ctx: DialogContext<TState>,
       next: () => Promise<void>
     ): Promise<void> => {
       try {
@@ -407,19 +423,19 @@ export class DialogManager<
           return next();
         }
 
-        const window = this.windows.get(windowId);
+        const window = this.windows.get(windowId) as
+          | WindowConfig<TState, TId, TKeys>
+          | undefined;
         if (!window) {
           return next();
         }
 
         const t = this.getTranslator(ctx);
 
-        // 🛡️ Проверяем Guard на уровне middleware перед обработкой кликов или ввода
         if (window.guard) {
           const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
             logger.warn(`Window guard blocked middleware action`, { userId, windowId });
-            // Снимаем «часики» с нажатой кнопки
             if (ctx.callbackQuery) {
               await ctx.answerCallbackQuery().catch(() => { });
             }
@@ -431,18 +447,17 @@ export class DialogManager<
               fromWindow: windowId,
               toWindow: guardResult,
             });
-            await this.goTo(ctx, guardResult as TId);
+            await this.goTo(ctx, guardResult);
             return;
           }
         }
 
-        // 1. Обработка нажатий на инлайн-кнопки
+        // 1. Инлайн-кнопки
         if (ctx.callbackQuery && ctx.callbackQuery.data) {
           const actionKey = ctx.callbackQuery.data;
 
           logger.debug(`User triggered action`, { userId, windowId, actionKey });
 
-          // 🌐 Перехват смены языка (формат: lang_ru, lang_en и т.д.)
           if (actionKey.startsWith('lang_')) {
             const newLang = actionKey.replace('lang_', '');
             try {
@@ -461,7 +476,7 @@ export class DialogManager<
 
           if (actionKey === 'global_back_to_menu' && this.rootWindowId !== undefined) {
             try {
-              await this.goTo(ctx, this.rootWindowId);
+              await this.goTo(ctx, this.rootWindowId as TId);
             } finally {
               if (!ctx.callbackQuery.inline_message_id) {
                 await ctx.answerCallbackQuery().catch(() => { });
@@ -509,13 +524,12 @@ export class DialogManager<
           return;
         }
 
-        // 2. Обработка обычного текстового ввода с форматтером и валидацией через Zod
+        // 2. Текстовый ввод
         if (
           ctx.message &&
           ctx.message.text &&
           (window.inputSchema || window.onInput || window.formatter)
         ) {
-          // Команды (/start и т.д.) не считаются вводом, отдаём их дальше
           if (ctx.message.text.startsWith('/')) {
             return next();
           }
