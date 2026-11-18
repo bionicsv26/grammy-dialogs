@@ -1,10 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import {
-  DialogManager,
-  defineWindows,
-  type DialogContext,
-  type WindowActionHandler,
-} from '../dialog-manager.js';
+import { defineWindows, type WindowActionHandler } from '../dialog-manager.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
@@ -15,39 +10,30 @@ import {
 import { isUserAdmin } from '../utils/auth.js';
 import { escapeMarkdown } from '../utils/markdown.js';
 import type { AppTranslationKeys } from '../translations.js';
-import type { SharedWindowId } from './shared.js';
+import type { CoreWindowId } from './core.dialog.js';
 
 export interface QuestionnaireState {
   name?: string;
   interests?: string[];
   returnTo?: QuestionnaireWindowId;
-  previousWindow?: string;
   error?: string;
   validatedInput?: any;
   broadcastText?: string;
 }
 
-// Единый источник правды для ID окон модуля.
-// 'select_branch' убран — он принадлежит branching.
 export const questionnaireWindowIds = [
-  'main_menu',
   'ask_name',
   'ask_interests',
   'summary',
-  'completed',
-  'confirm_restart',
   'admin_panel',
   'admin_stats',
   'admin_broadcast',
-  'settings_lang',
 ] as const;
 
 export type QuestionnaireWindowId = typeof questionnaireWindowIds[number];
 
-export function createQuestionnaireWindows<
-  TState extends QuestionnaireState
->() {
-  type Id = QuestionnaireWindowId | SharedWindowId;
+export function createQuestionnaireWindows<TState extends QuestionnaireState>() {
+  type Id = QuestionnaireWindowId | CoreWindowId;
 
   const toggleActions: Record<string, WindowActionHandler<TState, Id, AppTranslationKeys>> =
     Object.fromEntries(
@@ -74,41 +60,7 @@ export function createQuestionnaireWindows<
     );
 
   return defineWindows<TState, Id, AppTranslationKeys>([
-    // 1. Главное меню
-    {
-      id: 'main_menu',
-      disableBackButton: true,
-      render: async (ctx, t) => {
-        const keyboard = new InlineKeyboard()
-          .text(t('btn_start_form'), 'to_form')
-          .row()
-          .text(t('btn_select_branch'), 'proceed_to_branches')
-          .row()
-          .text(t('btn_settings_lang'), 'open_settings_lang');
-
-        if (isUserAdmin(ctx.from?.id)) {
-          keyboard.row().text(t('btn_admin_panel'), 'open_admin');
-        }
-
-        return { text: t('main_menu_text'), keyboard };
-      },
-      actions: {
-        to_form: async (ctx, manager) => {
-          await manager.goTo(ctx, 'ask_name');
-        },
-        proceed_to_branches: async (ctx, manager) => {
-          await manager.goTo(ctx, 'select_branch');
-        },
-        open_admin: async (ctx, manager) => {
-          await manager.goTo(ctx, 'admin_panel');
-        },
-        open_settings_lang: async (ctx, manager) => {
-          await manager.goTo(ctx, 'settings_lang');
-        },
-      },
-    },
-
-    // 2. Ввод имени
+    // Ввод имени
     {
       id: 'ask_name',
       disableBackButton: true,
@@ -158,7 +110,7 @@ export function createQuestionnaireWindows<
       },
     },
 
-    // 3. Выбор технологий
+    // Выбор технологий
     {
       id: 'ask_interests',
       disableBackButton: true,
@@ -218,7 +170,7 @@ export function createQuestionnaireWindows<
       },
     },
 
-    // 4. Предпросмотр
+    // Предпросмотр
     {
       id: 'summary',
       guard: async (ctx) => {
@@ -312,48 +264,7 @@ export function createQuestionnaireWindows<
       },
     },
 
-    // 5. Финальное окно
-    {
-      id: 'completed',
-      disableBackButton: true,
-      render: async (_ctx, t) => {
-        const keyboard = new InlineKeyboard().text(t('btn_fill_again'), 'restart');
-        return { text: t('completed_text'), keyboard };
-      },
-      actions: {
-        restart: async (ctx, manager) => {
-          await manager.start(ctx, 'main_menu');
-        },
-      },
-    },
-
-    // 6. Подтверждение сброса при /start
-    {
-      id: 'confirm_restart',
-      disableBackButton: true,
-      render: async (_ctx, t) => {
-        const keyboard = new InlineKeyboard()
-          .text(t('btn_confirm_restart'), 'do_restart')
-          .row()
-          .text(t('btn_continue_filling'), 'cancel_restart')
-          .row()
-          .text(t('btn_to_main_menu'), 'global_back_to_menu');
-
-        return { text: t('confirm_restart_text'), keyboard };
-      },
-      actions: {
-        do_restart: async (ctx, manager) => {
-          await manager.start(ctx, 'main_menu');
-        },
-        cancel_restart: async (ctx, manager) => {
-          const prevWindow = (ctx.session.data.previousWindow ?? 'summary') as QuestionnaireWindowId;
-          delete ctx.session.data.previousWindow;
-          await manager.goTo(ctx, prevWindow);
-        },
-      },
-    },
-
-    // 7. Админ-панель
+    // Админ-панель
     {
       id: 'admin_panel',
       guard: async (ctx, _manager, t) => {
@@ -422,22 +333,6 @@ export function createQuestionnaireWindows<
           delete ctx.session.data.broadcastText;
           await manager.goTo(ctx, 'admin_panel');
         },
-      },
-    },
-
-    // Настройки языка
-    {
-      id: 'settings_lang',
-      render: async (ctx, t) => {
-        const currentLang = ctx.session.lang || 'ru';
-
-        const keyboard = new InlineKeyboard()
-          .text(currentLang === 'ru' ? '🇷🇺 Русский (актив.)' : '🇷🇺 Русский', 'lang_ru')
-          .text(currentLang === 'en' ? '🇬🇧 English (act.)' : '🇬🇧 English', 'lang_en')
-          .row()
-          .text(t('btn_to_main_menu'), 'global_back_to_menu');
-
-        return { text: t('settings_lang_title'), keyboard };
       },
     },
   ]);

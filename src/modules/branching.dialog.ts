@@ -1,19 +1,16 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  DialogManager,
   defineWindows,
   type TranslationFunction,
   type WindowActionHandler,
 } from '../dialog-manager.js';
 import type { AppTranslationKeys } from '../translations.js';
-import type { SharedWindowId } from './shared.js';
+import type { CoreWindowId } from './core.dialog.js';
 
 export interface BranchingState {
   chosenBranch?: 'tech' | 'design' | 'business';
 }
 
-// Единый источник правды для ID окон модуля.
-// 'completed' убран — он принадлежит questionnaire.
 export const branchingWindowIds = [
   'select_branch',
   'window_tech_step',
@@ -23,10 +20,8 @@ export const branchingWindowIds = [
 
 export type BranchingWindowId = typeof branchingWindowIds[number];
 
-export function createBranchingWindows<
-  TState extends BranchingState
->() {
-  type Id = BranchingWindowId | SharedWindowId;
+export function createBranchingWindows<TState extends BranchingState>() {
+  type Id = BranchingWindowId | CoreWindowId;
 
   const branchKeyboard = (t: TranslationFunction<AppTranslationKeys>) =>
     new InlineKeyboard()
@@ -41,7 +36,6 @@ export function createBranchingWindows<
   };
 
   return defineWindows<TState, Id, AppTranslationKeys>([
-    // 1. Развилка
     {
       id: 'select_branch',
       render: async (_ctx, t) => {
@@ -70,7 +64,6 @@ export function createBranchingWindows<
       },
     },
 
-    // 2. Техническая ветка
     {
       id: 'window_tech_step',
       render: async (_ctx, t) => ({
@@ -80,7 +73,6 @@ export function createBranchingWindows<
       actions: branchActions,
     },
 
-    // 3. Дизайн-ветка
     {
       id: 'window_design_step',
       render: async (_ctx, t) => ({
@@ -90,7 +82,6 @@ export function createBranchingWindows<
       actions: branchActions,
     },
 
-    // 4. Бизнес-ветка
     {
       id: 'window_business_step',
       render: async (_ctx, t) => ({

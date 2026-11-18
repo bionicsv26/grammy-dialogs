@@ -151,6 +151,12 @@ export class DialogManager<
   }
 
   register(window: WindowConfig<TState, TId, TKeys>): this {
+    if (this.windows.has(window.id)) {
+      throw new Error(
+        `Window with id "${window.id}" is already registered. ` +
+        `Each window must be owned by exactly one module.`
+      );
+    }
     this.windows.set(window.id, window as AnyWindowConfig);
     return this;
   }

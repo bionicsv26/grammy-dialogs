@@ -20,10 +20,15 @@ import {
   type BranchingState,
   type BranchingWindowId,
 } from './modules/branching.dialog.js';
+import {
+  createCoreWindows,
+  type CoreState,
+  type CoreWindowId,
+} from './modules/core.dialog.js';
 
 // 1. Единые типы приложения
-export type AppState = QuestionnaireState & BranchingState;
-export type AppWindowId = QuestionnaireWindowId | BranchingWindowId;
+export type AppState = CoreState & QuestionnaireState & BranchingState;
+export type AppWindowId = CoreWindowId | QuestionnaireWindowId | BranchingWindowId;
 export type AppContext = DialogContext<AppState>;
 
 // 2. Бот (с прокси в режиме разработки)
@@ -118,6 +123,7 @@ const manager = new DialogManager<AppState, AppWindowId, AppTranslationKeys>(bot
 
 // 6. Окна диалогов (типобезопасная композиция, без кастов менеджера)
 manager
+  .registerAll(createCoreWindows<AppState>())
   .registerAll(createQuestionnaireWindows<AppState>())
   .registerAll(createBranchingWindows<AppState>());
 
