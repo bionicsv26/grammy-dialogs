@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { defineWindows, type WindowActionHandler } from '../dialog-manager.js';
+import { defineWindows, defineWindow, type WindowActionHandler } from '../dialog-manager.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
@@ -17,7 +17,6 @@ export interface QuestionnaireState {
   interests?: string[];
   returnTo?: QuestionnaireWindowId;
   error?: string;
-  validatedInput?: any;
   broadcastText?: string;
 }
 
@@ -34,6 +33,7 @@ export type QuestionnaireWindowId = typeof questionnaireWindowIds[number];
 
 export function createQuestionnaireWindows<TState extends QuestionnaireState>() {
   type Id = QuestionnaireWindowId | CoreWindowId;
+  const win = defineWindow<TState, Id, AppTranslationKeys>();
 
   const toggleActions: Record<string, WindowActionHandler<TState, Id, AppTranslationKeys>> =
     Object.fromEntries(
@@ -60,8 +60,8 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
     );
 
   return defineWindows<TState, Id, AppTranslationKeys>([
-    // Ввод имени
-    {
+    // Ввод имени (TValue выводится из nameSchema → string)
+    win({
       id: 'ask_name',
       disableBackButton: true,
       render: async (ctx, t) => {
@@ -88,9 +88,8 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
           .replace(/\s+/g, ' ')
           .replace(/(^|\s)\S/g, (l) => l.toUpperCase()),
       inputSchema: nameSchema,
-      onInput: async (ctx, manager) => {
-        ctx.session.data.name = ctx.session.data.validatedInput;
-        delete ctx.session.data.validatedInput;
+      onInput: async (ctx, manager, _t, value) => {
+        ctx.session.data.name = value; // value: string
 
         const returnTo = ctx.session.data.returnTo;
         delete ctx.session.data.returnTo;
@@ -108,9 +107,9 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
           await manager.goTo(ctx, 'summary');
         },
       },
-    },
+    }),
 
-    // Выбор технологий
+    // Выбор технологий (ввода нет — inline)
     {
       id: 'ask_interests',
       disableBackButton: true,
@@ -310,16 +309,16 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
       },
     },
 
-    // Ввод рассылки
-    {
+    // Ввод рассылки (схемы нет → TValue = string по умолчанию)
+    win({
       id: 'admin_broadcast',
       disableBackButton: true,
       render: async (_ctx, t) => {
         const keyboard = new InlineKeyboard().text(t('btn_cancel_broadcast'), 'cancel_broadcast');
         return { text: t('admin_broadcast_title'), keyboard };
       },
-      onInput: async (ctx, manager, t) => {
-        const textToBroadcast = ctx.msg?.text;
+      onInput: async (ctx, manager, t, value) => {
+        const textToBroadcast = value; // value: string
         if (!textToBroadcast) return;
 
         const simulatedCount = 1;
@@ -334,6 +333,6 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
           await manager.goTo(ctx, 'admin_panel');
         },
       },
-    },
+    }),
   ]);
 }

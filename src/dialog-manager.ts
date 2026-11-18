@@ -12,7 +12,7 @@ export interface DialogSession<
   currentWindow?: string;
   history?: string[];
   lang?: string;
-  data: TState & { error?: string; validatedInput?: any };
+  data: TState & { error?: string };
   messageId?: number;
 }
 
@@ -45,11 +45,13 @@ export type WindowActionHandler<
 export type WindowInputHandler<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TValue = string
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
-  t: TranslationFunction<TKeys>
+  t: TranslationFunction<TKeys>,
+  value: TValue
 ) => Promise<void> | void;
 
 export type WindowGuard<
@@ -62,12 +64,13 @@ export type WindowGuard<
   t: TranslationFunction<TKeys>
 ) => Promise<boolean | TId> | boolean | TId;
 
-export type WindowInputFormatter = (rawInput: string) => any;
+export type WindowInputFormatter<TValue = string> = (rawInput: string) => TValue;
 
 export interface WindowConfig<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TValue = string
 > {
   id: TId;
   render: (
@@ -75,9 +78,9 @@ export interface WindowConfig<
     t: TranslationFunction<TKeys>
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
-  onInput?: WindowInputHandler<TState, TId, TKeys>;
-  formatter?: WindowInputFormatter;
-  inputSchema?: z.ZodType;
+  onInput?: WindowInputHandler<TState, TId, TKeys, TValue>;
+  formatter?: WindowInputFormatter<TValue>;
+  inputSchema?: z.ZodType<TValue>;
   guard?: WindowGuard<TState, TId, TKeys>;
   disableBackButton?: boolean;
 }
@@ -104,23 +107,38 @@ export interface DialogManagerOptions<
   rootWindowId?: TId;
 }
 
-/** Внутреннее стирание дженериков на границе хранения. */
-type AnyWindowConfig = WindowConfig<any, any, any>;
+/** Внутреннее стирание дженериков на границе хранения/коллекции. */
+type AnyWindowConfig = WindowConfig<any, any, any, any>;
 type AnyErrorHandler = (
   error: unknown,
   ctx: DialogContext<any>,
   manager: DialogManager<any, any, any>
 ) => Promise<void> | void;
 
-/** Хелпер для определения окон модуля с контекстной типизацией хендлеров. */
+/** Коллекция окон модуля (TValue стёрт до any — окна гетерогенны). */
 export function defineWindows<
   TState extends Record<string, any>,
   TId extends string,
   TKeys extends string = string
 >(
-  windows: readonly WindowConfig<TState, TId, TKeys>[]
-): readonly WindowConfig<TState, TId, TKeys>[] {
+  windows: readonly WindowConfig<TState, TId, TKeys, any>[]
+): readonly WindowConfig<TState, TId, TKeys, any>[] {
   return windows;
+}
+
+/**
+ * Каррированный хелпер: фиксирует контекст модуля (TState/TId/TKeys),
+ * а TValue выводит из inputSchema конкретного окна.
+ * Оборачивай окна с вводом: win({ id, inputSchema, onInput, ... }).
+ */
+export function defineWindow<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+>() {
+  return <TValue = string>(
+    window: WindowConfig<TState, TId, TKeys, TValue>
+  ): WindowConfig<TState, TId, TKeys, TValue> => window;
 }
 
 export class DialogManager<
@@ -129,13 +147,12 @@ export class DialogManager<
   TKeys extends string = string
 > {
   // Все приватные поля намеренно не зависят от TState/TId/TKeys,
-  // чтобы разные инстанциации класса были структурно совместимы
-  // (иначе приватные поля делают класс номинальным и инвариантным).
+  // чтобы разные инстанциации класса были структурно совместимы.
   private windows = new Map<string, AnyWindowConfig>();
-  private errorHandler?: AnyErrorHandler | undefined;
+  private errorHandler: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
   private defaultLang: string;
-  private rootWindowId?: string | undefined;
+  private rootWindowId: string | undefined;
   private handlingError = new WeakSet<object>();
   private bot: Bot<any>;
 
@@ -150,7 +167,7 @@ export class DialogManager<
     this.rootWindowId = options?.rootWindowId;
   }
 
-  register(window: WindowConfig<TState, TId, TKeys>): this {
+  register<TValue = string>(window: WindowConfig<TState, TId, TKeys, TValue>): this {
     if (this.windows.has(window.id)) {
       throw new Error(
         `Window with id "${window.id}" is already registered. ` +
@@ -161,7 +178,7 @@ export class DialogManager<
     return this;
   }
 
-  registerAll(windows: readonly WindowConfig<TState, TId, TKeys>[]): this {
+  registerAll(windows: readonly WindowConfig<TState, TId, TKeys, any>[]): this {
     for (const w of windows) this.register(w);
     return this;
   }
@@ -181,10 +198,9 @@ export class DialogManager<
 
       if (!params) return text;
 
-      // Один проход по исходному шаблону:
-      // - функция-замена вставляет значение литерально (никаких $-паттернов);
-      // - вставленные значения не пересканируются (нет каскада);
-      // - паттерн обобщённый, RegExp из ключей не строится.
+      // Один проход: функция-замена вставляет значение литерально
+      // (никаких $-паттернов), вставленное не пересканируется,
+      // RegExp из ключей не строится.
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
           ? String(params[name])
@@ -296,7 +312,7 @@ export class DialogManager<
 
       logger.info(`User navigated to window`, {
         userId: ctx.from?.id,
-        fromWindow: currentWindow || 'none',
+        fromWindow: currentWindow,
         toWindow: windowId,
         historyDepth: ctx.session.history.length,
       });
@@ -340,7 +356,7 @@ export class DialogManager<
       }
 
       const window = this.windows.get(windowId) as
-        | WindowConfig<TState, TId, TKeys>
+        | WindowConfig<TState, TId, TKeys, any>
         | undefined;
       if (!window) {
         logger.error(`Window not found in registry during show`, { userId, windowId });
@@ -430,7 +446,7 @@ export class DialogManager<
         }
 
         const window = this.windows.get(windowId) as
-          | WindowConfig<TState, TId, TKeys>
+          | WindowConfig<TState, TId, TKeys, any>
           | undefined;
         if (!window) {
           return next();
@@ -530,7 +546,7 @@ export class DialogManager<
           return;
         }
 
-        // 2. Текстовый ввод
+        // 2. Текстовый ввод: raw → formatter → schema → value → onInput
         if (
           ctx.message &&
           ctx.message.text &&
@@ -543,10 +559,10 @@ export class DialogManager<
           await ctx.deleteMessage().catch(() => { });
 
           const rawInput = ctx.message.text.trim();
-          const formattedInput = window.formatter ? window.formatter(rawInput) : rawInput;
+          let value: unknown = window.formatter ? window.formatter(rawInput) : rawInput;
 
           if (window.inputSchema) {
-            const parseResult = window.inputSchema.safeParse(formattedInput);
+            const parseResult = window.inputSchema.safeParse(value);
 
             if (!parseResult.success) {
               const firstError =
@@ -565,15 +581,15 @@ export class DialogManager<
               return;
             }
 
-            delete ctx.session.data.error;
-            ctx.session.data.validatedInput = parseResult.data;
-          } else {
-            ctx.session.data.validatedInput = formattedInput;
+            value = parseResult.data;
           }
+
+          // Ввод принят — очищаем прошлую ошибку (в обоих путях).
+          delete ctx.session.data.error;
 
           if (window.onInput) {
             try {
-              await window.onInput(ctx, this, t);
+              await window.onInput(ctx, this, t, value);
             } catch (error) {
               logger.error(`Error occurred while executing onInput handler`, {
                 userId,
