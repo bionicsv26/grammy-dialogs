@@ -159,7 +159,18 @@ export class DialogManager<
 
   // 🪄 Хелпер для добавления кнопки «Назад» к любой инлайн-клавиатуре
   static appendBackButton(keyboard: InlineKeyboard, text: string = '⬅️ Назад'): InlineKeyboard {
-    return keyboard.row().text(text, 'global_back');
+    const result = keyboard.clone();
+    const rows = result.inline_keyboard;
+    const lastRow = rows[rows.length - 1];
+
+    if (lastRow && lastRow.length === 0) {
+      // Пустая клавиатура (new InlineKeyboard() = [[]]) — заполняем уже
+      // существующий ряд, чтобы не отправлять в разметке пустой ряд.
+      result.text(text, 'global_back');
+    } else {
+      result.row().text(text, 'global_back');
+    }
+    return result;
   }
 
   // 🛡️ Централизованный обработчик ошибок
@@ -320,15 +331,15 @@ export class DialogManager<
       // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений и локализации
       const isMainOrCompleted =
         windowId === 'main_menu' || windowId === 'completed' || windowId === 'confirm_restart';
-      if (
-        keyboard &&
-        ctx.session.history &&
-        ctx.session.history.length > 0 &&
+
+      const shouldShowBack =
+        !!ctx.session.history?.length &&
         !isMainOrCompleted &&
-        !window.disableBackButton
-      ) {
+        !window.disableBackButton;
+
+      if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
-          keyboard,
+          keyboard ?? new InlineKeyboard(),
           (t as TranslationFunction)('btn_back')
         );
       }
