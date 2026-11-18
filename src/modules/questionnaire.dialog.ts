@@ -52,6 +52,7 @@ export function registerQuestionnaireModule<
   // 1. Окно приветствия (Главное меню)
   manager.register({
     id: 'main_menu',
+    disableBackButton: true,
     render: async (ctx, t) => {
       const keyboard = new InlineKeyboard()
         .text(t('btn_start_form'), 'to_form')
@@ -339,6 +340,7 @@ export function registerQuestionnaireModule<
   // 6. Окно подтверждения сброса при отправке /start
   manager.register({
     id: 'confirm_restart',
+    disableBackButton: true,
     render: async (_ctx, t) => {
       const keyboard = new InlineKeyboard()
         .text(t('btn_confirm_restart'), 'do_restart')

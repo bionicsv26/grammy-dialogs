@@ -87,7 +87,7 @@ export interface WindowConfig<
 // ⚙️ Опции конфигурации DialogManager (включая i18n)
 export interface DialogManagerOptions<
   TState extends Record<string, any>,
-  TId extends string,
+  TId extends string = string,
   TKeys extends string = string
 > {
   onError?: (
@@ -97,6 +97,14 @@ export interface DialogManagerOptions<
   ) => Promise<void> | void;
   translations?: Record<string, Record<string, string>>;
   defaultLang?: string;
+  /**
+   * Корень навигации («главное меню»):
+   * - переход в это окно очищает историю;
+   * - встроенный экшен global_back_to_menu ведёт сюда.
+   * Если не задан — спецобработка отключена, global_back_to_menu
+   * обрабатывается как обычный экшен окна.
+   */
+  rootWindowId?: TId;
 }
 
 export class DialogManager<
@@ -111,6 +119,7 @@ export class DialogManager<
 
   // Контексты, для которых ошибка уже обрабатывается (защита от рекурсии)
   private handlingError = new WeakSet<object>();
+  private rootWindowId?: TId | undefined;
 
   constructor(
     private bot: Bot<DialogContext<TState, TId>>,
@@ -119,6 +128,7 @@ export class DialogManager<
     this.errorHandler = options?.onError;
     this.translations = options?.translations ?? {};
     this.defaultLang = options?.defaultLang ?? 'ru';
+    this.rootWindowId = options?.rootWindowId;
   }
 
   register(window: WindowConfig<TState, TId, TKeys>): this {
@@ -249,8 +259,9 @@ export class DialogManager<
         ctx.session.history = [];
       }
 
-      // Переход в главное меню начинает навигацию заново, старая история не нужна
-      if (windowId === 'main_menu') {
+      // Переход в корень навигации начинает её заново — старая история не нужна.
+      // Если rootWindowId не задан, сравнение всегда false (windowId — строка).
+      if (windowId === this.rootWindowId) {
         ctx.session.history = [];
       } else if (currentWindow) {
         ctx.session.history.push(currentWindow);
@@ -333,18 +344,14 @@ export class DialogManager<
       let keyboard = rendered.keyboard;
 
       // 🪄 Автоматически добавляем кнопку «Назад» с учетом исключений и локализации
-      const isMainOrCompleted =
-        windowId === 'main_menu' || windowId === 'completed' || windowId === 'confirm_restart';
-
       const shouldShowBack =
         !!ctx.session.history?.length &&
-        !isMainOrCompleted &&
         !window.disableBackButton;
 
       if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
           keyboard ?? new InlineKeyboard(),
-          (t as TranslationFunction)('btn_back')
+          (t as TranslationFunction)('btn_back') // каст уйдёт в шаге 2.5
         );
       }
 
@@ -452,9 +459,9 @@ export class DialogManager<
             return;
           }
 
-          if (actionKey === 'global_back_to_menu') {
+          if (actionKey === 'global_back_to_menu' && this.rootWindowId !== undefined) {
             try {
-              await this.goTo(ctx, 'main_menu' as TId);
+              await this.goTo(ctx, this.rootWindowId);
             } finally {
               if (!ctx.callbackQuery.inline_message_id) {
                 await ctx.answerCallbackQuery().catch(() => { });

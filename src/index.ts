@@ -106,6 +106,7 @@ bot.use(async (ctx, next) => {
 const manager = new DialogManager<AppState, AppWindowId, AppTranslationKeys>(bot, {
   translations,
   defaultLang: 'ru',
+  rootWindowId: 'main_menu',
   onError: async (error, ctx) => {
     logger.error(`Unhandled error in dialog flow`, { error, userId: ctx.from?.id });
     delete ctx.session.data.error;
