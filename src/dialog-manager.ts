@@ -140,13 +140,17 @@ export class DialogManager<
         return key;
       }
 
-      let result = text;
-      if (params) {
-        for (const [paramKey, val] of Object.entries(params)) {
-          result = result.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(val));
-        }
-      }
-      return result;
+      if (!params) return text;
+
+      // Один проход по исходному шаблону:
+      // - функция-замена вставляет значение ЛИТЕРАЛЬНО (никаких $-паттернов);
+      // - вставленные значения не пересканируются (нет каскада);
+      // - паттерн обобщённый, RegExp из ключей не строится (нет инъекции/исключений).
+      return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+        Object.prototype.hasOwnProperty.call(params, name)
+          ? String(params[name])
+          : match
+      );
     };
   }
 
