@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 import { logger } from './logger.js';
+import { isMessageNotModified } from './utils/telegram-errors.js';
 
 export interface DialogSession<
   TState extends Record<string, any> = Record<string, any>,
@@ -349,6 +350,15 @@ export class DialogManager<
           );
           return;
         } catch (error) {
+          // Контент уже актуален. Ничего не делаем и НЕ трогаем messageId —
+          // следующие рендеры должны редактировать это же сообщение.
+          if (isMessageNotModified(error)) {
+            logger.debug(`Message is already up to date`, { userId, windowId });
+            return;
+          }
+
+          // Реальная потеря сообщения (удалено, не найдено, нельзя редактировать) —
+          // отправляем новое, как и раньше.
           logger.debug(`Failed to edit message, sending a new one`, { userId, error });
           delete ctx.session.messageId;
         }
