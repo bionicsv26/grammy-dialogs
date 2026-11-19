@@ -12,6 +12,7 @@ export const translations = {
     language_changed: 'Язык успешно изменен!',
     action_not_available: 'Действие недоступно',
     invalid_format: 'Неверный формат данных',
+    error_fallback: '⚠️ Что-то пошло не так. Попробуйте позже или введите /start.',
 
     // Главное меню
     main_menu_text: '*Добро пожаловать!*\n\nЭто демонстрация мини-библиотеки диалогов на TypeScript и grammY.',
@@ -84,6 +85,7 @@ export const translations = {
     language_changed: 'Language successfully changed!',
     action_not_available: 'Action not available',
     invalid_format: 'Invalid data format',
+    error_fallback: '⚠️ Something went wrong. Try again later or send /start.',
 
     // Main Menu
     main_menu_text: '*Welcome!*\n\nThis is a demonstration of the dialog mini-library built with TypeScript & grammY.',

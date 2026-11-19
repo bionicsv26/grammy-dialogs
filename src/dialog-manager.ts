@@ -3,6 +3,31 @@ import { z } from 'zod';
 import { logger } from './logger.js';
 import { isMessageNotModified } from './utils/telegram-errors.js';
 
+// ─── Встроенные core-переводы ядра ──────────────────────────────────────────
+const coreRu = {
+  btn_back: '⬅️ Назад',
+  language_changed: 'Язык изменён',
+  action_not_available: 'Это действие сейчас недоступно',
+  invalid_format: 'Неверный формат ввода',
+  error_fallback: '⚠️ Что-то пошло не так. Попробуйте позже или введите /start.',
+} as const;
+
+export type CoreTranslationKey = keyof typeof coreRu;
+
+const coreEn: Record<CoreTranslationKey, string> = {
+  btn_back: '⬅️ Back',
+  language_changed: 'Language changed',
+  action_not_available: 'This action is not available right now',
+  invalid_format: 'Invalid input format',
+  error_fallback: '⚠️ Something went wrong. Try again later or send /start.',
+};
+
+export const coreTranslations: Record<'ru' | 'en', Record<CoreTranslationKey, string>> = {
+  ru: coreRu,
+  en: coreEn,
+};
+
+// ─── Сессия и контекст ──────────────────────────────────────────────────────
 export interface DialogSession<
   TState extends Record<string, any> = Record<string, any>
 > {
@@ -22,8 +47,9 @@ export type DialogContext<
   session: DialogSession<TState>;
 };
 
+// ─── Типы переводов и окон ──────────────────────────────────────────────────
 export type TranslationFunction<TKeys extends string = string> = (
-  key: TKeys,
+  key: TKeys | CoreTranslationKey,
   params?: Record<string, string | number>
 ) => string;
 
@@ -95,7 +121,7 @@ export interface DialogManagerOptions<
     ctx: DialogContext<TState>,
     manager: DialogManager<TState, TId, TKeys>
   ) => Promise<void> | void;
-  translations?: Record<string, Record<string, string>>;
+  translations?: Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>;
   defaultLang?: string;
   /**
    * Корень навигации («главное меню»):
@@ -141,6 +167,7 @@ export function defineWindow<
   ): WindowConfig<TState, TId, TKeys, TValue> => window;
 }
 
+// ─── Менеджер диалогов ──────────────────────────────────────────────────────
 export class DialogManager<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
@@ -162,9 +189,24 @@ export class DialogManager<
   ) {
     this.bot = bot;
     this.errorHandler = options?.onError;
-    this.translations = options?.translations ?? {};
     this.defaultLang = options?.defaultLang ?? 'ru';
     this.rootWindowId = options?.rootWindowId;
+
+    // Core-дефолты打底, пользовательские переводы перекрывают.
+    const merged: Record<string, Record<string, string>> = {};
+    for (const [lang, dict] of Object.entries(coreTranslations)) {
+      merged[lang] = { ...dict };
+    }
+    const userTranslations = options?.translations;
+    if (userTranslations) {
+      for (const [lang, dict] of Object.entries(userTranslations)) {
+        const target = (merged[lang] ??= {});
+        for (const [key, value] of Object.entries(dict)) {
+          if (typeof value === 'string') target[key] = value;
+        }
+      }
+    }
+    this.translations = merged;
   }
 
   register<TValue = string>(window: WindowConfig<TState, TId, TKeys, TValue>): this {
@@ -186,7 +228,7 @@ export class DialogManager<
   public getTranslator(ctx: DialogContext<TState>): TranslationFunction<TKeys> {
     const lang = ctx.session.lang ?? this.defaultLang;
 
-    return (key: TKeys, params?: Record<string, string | number>): string => {
+    return (key: TKeys | CoreTranslationKey, params?: Record<string, string | number>): string => {
       const text =
         this.translations[lang]?.[key] ??
         this.translations[this.defaultLang]?.[key];
@@ -218,7 +260,7 @@ export class DialogManager<
   // Не мутирует переданную клавиатуру: клонируем и добавляем «Назад».
   static appendBackButton(
     keyboard: InlineKeyboard,
-    text: string = '⬅️ Назад'
+    text: string = coreTranslations.en.btn_back
   ): InlineKeyboard {
     const result = keyboard.clone();
     const rows = result.inline_keyboard;
@@ -255,7 +297,7 @@ export class DialogManager<
       }
 
       await ctx
-        .reply('⚠️ Что-то пошло не так. Попробуйте позже или введите /start.')
+        .reply(this.getTranslator(ctx)('error_fallback'))
         .catch(() => { });
     } finally {
       this.handlingError.delete(ctx);
@@ -393,7 +435,7 @@ export class DialogManager<
       if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
           keyboard ?? new InlineKeyboard(),
-          (t as TranslationFunction)('btn_back') // каст уйдёт в шаге 2.5
+          t('btn_back')
         );
       }
 
@@ -488,7 +530,7 @@ export class DialogManager<
               if (!ctx.callbackQuery.inline_message_id) {
                 await ctx
                   .answerCallbackQuery({
-                    text: (this.getTranslator(ctx) as TranslationFunction)('language_changed'),
+                    text: this.getTranslator(ctx)('language_changed'),
                   })
                   .catch(() => { });
               }
@@ -523,7 +565,7 @@ export class DialogManager<
           if (!actionHandler) {
             logger.warn(`Action handler not found`, { userId, windowId, actionKey });
             await ctx
-              .answerCallbackQuery({ text: (t as TranslationFunction)('action_not_available') })
+              .answerCallbackQuery({ text: t('action_not_available') })
               .catch(() => { });
             return next();
           }
@@ -566,8 +608,7 @@ export class DialogManager<
 
             if (!parseResult.success) {
               const firstError =
-                parseResult.error.issues[0]?.message ||
-                (t as TranslationFunction)('invalid_format');
+                parseResult.error.issues[0]?.message || t('invalid_format');
 
               logger.warn(`Window input validation failed`, {
                 userId,
