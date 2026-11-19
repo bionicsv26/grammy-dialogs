@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { defineWindows } from '../dialog-manager.js';
+import { defineWindows, coreCallbacks } from '../dialog-manager.js';
 import { isUserAdmin } from '../utils/auth.js';
 import type { AppTranslationKeys } from '../translations.js';
 import type { QuestionnaireWindowId } from './questionnaire.dialog.js';
@@ -23,7 +23,7 @@ export function createCoreWindows<TState extends CoreState>() {
   type Id = CoreWindowId | QuestionnaireWindowId | BranchingWindowId;
 
   return defineWindows<TState, Id, AppTranslationKeys>([
-    // Главное меню (перенесено из questionnaire)
+    // Главное меню
     {
       id: 'main_menu',
       disableBackButton: true,
@@ -82,7 +82,7 @@ export function createCoreWindows<TState extends CoreState>() {
           .row()
           .text(t('btn_continue_filling'), 'cancel_restart')
           .row()
-          .text(t('btn_to_main_menu'), 'global_back_to_menu');
+          .text(t('btn_to_main_menu'), coreCallbacks.root);
 
         return { text: t('confirm_restart_text'), keyboard };
       },
@@ -106,10 +106,16 @@ export function createCoreWindows<TState extends CoreState>() {
         const currentLang = ctx.session.lang || 'ru';
 
         const keyboard = new InlineKeyboard()
-          .text(currentLang === 'ru' ? '🇷🇺 Русский (актив.)' : '🇷🇺 Русский', 'lang_ru')
-          .text(currentLang === 'en' ? '🇬🇧 English (act.)' : '🇬🇧 English', 'lang_en')
+          .text(
+            currentLang === 'ru' ? '🇷🇺 Русский (актив.)' : '🇷🇺 Русский',
+            coreCallbacks.lang('ru')
+          )
+          .text(
+            currentLang === 'en' ? '🇬🇧 English (act.)' : '🇬🇧 English',
+            coreCallbacks.lang('en')
+          )
           .row()
-          .text(t('btn_to_main_menu'), 'global_back_to_menu');
+          .text(t('btn_to_main_menu'), coreCallbacks.root);
 
         return { text: t('settings_lang_title'), keyboard };
       },

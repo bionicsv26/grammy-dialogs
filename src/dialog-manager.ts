@@ -27,6 +27,29 @@ export const coreTranslations: Record<'ru' | 'en', Record<CoreTranslationKey, st
   en: coreEn,
 };
 
+// ─── Зарезервированный namespace core-callback'ов ───────────────────────────
+export const CALLBACK_NAMESPACE = '__dm';
+const CALLBACK_PREFIX = `${CALLBACK_NAMESPACE}:`;
+const LANG_PREFIX = `${CALLBACK_NAMESPACE}:lang:`;
+
+export const coreCallbacks = {
+  back: `${CALLBACK_NAMESPACE}:back`,
+  root: `${CALLBACK_NAMESPACE}:root`,
+  lang: (lang: string) => `${LANG_PREFIX}${lang}`,
+} as const;
+
+const CALLBACK_DATA_MAX_BYTES = 64;
+const textEncoder = new TextEncoder();
+
+function assertValidCallbackData(data: string, context: string): void {
+  const bytes = textEncoder.encode(data).length;
+  if (bytes === 0 || bytes > CALLBACK_DATA_MAX_BYTES) {
+    throw new Error(
+      `callback_data for ${context} must be 1-${CALLBACK_DATA_MAX_BYTES} bytes (UTF-8), got ${bytes}: "${data}"`
+    );
+  }
+}
+
 // ─── Сессия и контекст ──────────────────────────────────────────────────────
 export interface DialogSession<
   TState extends Record<string, any> = Record<string, any>
@@ -192,7 +215,7 @@ export class DialogManager<
     this.defaultLang = options?.defaultLang ?? 'ru';
     this.rootWindowId = options?.rootWindowId;
 
-    // Core-дефолты打底, пользовательские переводы перекрывают.
+    // Core-дефолты как база; пользовательские переводы перекрывают их.
     const merged: Record<string, Record<string, string>> = {};
     for (const [lang, dict] of Object.entries(coreTranslations)) {
       merged[lang] = { ...dict };
@@ -215,6 +238,14 @@ export class DialogManager<
         `Window with id "${window.id}" is already registered. ` +
         `Each window must be owned by exactly one module.`
       );
+    }
+    for (const actionKey of Object.keys(window.actions ?? {})) {
+      if (actionKey.startsWith(CALLBACK_PREFIX)) {
+        throw new Error(
+          `Action key "${actionKey}" in window "${window.id}" uses the reserved namespace "${CALLBACK_PREFIX}".`
+        );
+      }
+      assertValidCallbackData(actionKey, `action "${actionKey}" in window "${window.id}"`);
     }
     this.windows.set(window.id, window as AnyWindowConfig);
     return this;
@@ -269,9 +300,9 @@ export class DialogManager<
     if (lastRow && lastRow.length === 0) {
       // Пустая клавиатура (new InlineKeyboard() = [[]]) — заполняем
       // существующий ряд, чтобы не отправлять пустой ряд в разметке.
-      result.text(text, 'global_back');
+      result.text(text, coreCallbacks.back);
     } else {
-      result.row().text(text, 'global_back');
+      result.row().text(text, coreCallbacks.back);
     }
     return result;
   }
@@ -439,6 +470,17 @@ export class DialogManager<
         );
       }
 
+      // Лимит Telegram на callback_data кнопок (1–64 байта UTF-8).
+      if (keyboard) {
+        for (const row of keyboard.inline_keyboard) {
+          for (const button of row) {
+            if ('callback_data' in button && typeof button.callback_data === 'string') {
+              assertValidCallbackData(button.callback_data, `button in window "${windowId}"`);
+            }
+          }
+        }
+      }
+
       const otherOptions: { parse_mode: 'Markdown'; reply_markup?: InlineKeyboard } = {
         parse_mode: 'Markdown',
       };
@@ -522,23 +564,18 @@ export class DialogManager<
 
           logger.debug(`User triggered action`, { userId, windowId, actionKey });
 
-          if (actionKey.startsWith('lang_')) {
-            const newLang = actionKey.replace('lang_', '');
+          if (actionKey === coreCallbacks.back) {
             try {
-              await this.setLanguage(ctx, newLang);
+              await this.goBack(ctx);
             } finally {
               if (!ctx.callbackQuery.inline_message_id) {
-                await ctx
-                  .answerCallbackQuery({
-                    text: this.getTranslator(ctx)('language_changed'),
-                  })
-                  .catch(() => { });
+                await ctx.answerCallbackQuery().catch(() => { });
               }
             }
             return;
           }
 
-          if (actionKey === 'global_back_to_menu' && this.rootWindowId !== undefined) {
+          if (actionKey === coreCallbacks.root && this.rootWindowId !== undefined) {
             try {
               await this.goTo(ctx, this.rootWindowId as TId);
             } finally {
@@ -549,12 +586,15 @@ export class DialogManager<
             return;
           }
 
-          if (actionKey === 'global_back') {
+          if (actionKey.startsWith(LANG_PREFIX)) {
+            const newLang = actionKey.slice(LANG_PREFIX.length);
             try {
-              await this.goBack(ctx);
+              await this.setLanguage(ctx, newLang);
             } finally {
               if (!ctx.callbackQuery.inline_message_id) {
-                await ctx.answerCallbackQuery().catch(() => { });
+                await ctx
+                  .answerCallbackQuery({ text: this.getTranslator(ctx)('language_changed') })
+                  .catch(() => { });
               }
             }
             return;

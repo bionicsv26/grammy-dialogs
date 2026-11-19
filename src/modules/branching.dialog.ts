@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import {
   defineWindows,
+  coreCallbacks,
   type TranslationFunction,
   type WindowActionHandler,
 } from '../dialog-manager.js';
@@ -25,7 +26,7 @@ export function createBranchingWindows<TState extends BranchingState>() {
 
   const branchKeyboard = (t: TranslationFunction<AppTranslationKeys>) =>
     new InlineKeyboard()
-      .text(t('btn_to_main_menu'), 'global_back_to_menu')
+      .text(t('btn_to_main_menu'), coreCallbacks.root)
       .row()
       .text(t('btn_finish'), 'finish_flow');
 
@@ -36,6 +37,7 @@ export function createBranchingWindows<TState extends BranchingState>() {
   };
 
   return defineWindows<TState, Id, AppTranslationKeys>([
+    // Развилка
     {
       id: 'select_branch',
       render: async (_ctx, t) => {
@@ -64,6 +66,7 @@ export function createBranchingWindows<TState extends BranchingState>() {
       },
     },
 
+    // Техническая ветка
     {
       id: 'window_tech_step',
       render: async (_ctx, t) => ({
@@ -73,6 +76,7 @@ export function createBranchingWindows<TState extends BranchingState>() {
       actions: branchActions,
     },
 
+    // Дизайн-ветка
     {
       id: 'window_design_step',
       render: async (_ctx, t) => ({
@@ -82,6 +86,7 @@ export function createBranchingWindows<TState extends BranchingState>() {
       actions: branchActions,
     },
 
+    // Бизнес-ветка
     {
       id: 'window_business_step',
       render: async (_ctx, t) => ({
