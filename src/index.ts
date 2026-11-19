@@ -11,6 +11,11 @@ import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import {
+  createCoreWindows,
+  type CoreState,
+  type CoreWindowId,
+} from './modules/core.dialog.js';
+import {
   createQuestionnaireWindows,
   type QuestionnaireState,
   type QuestionnaireWindowId,
@@ -20,11 +25,6 @@ import {
   type BranchingState,
   type BranchingWindowId,
 } from './modules/branching.dialog.js';
-import {
-  createCoreWindows,
-  type CoreState,
-  type CoreWindowId,
-} from './modules/core.dialog.js';
 
 // 1. Единые типы приложения
 export type AppState = CoreState & QuestionnaireState & BranchingState;
@@ -47,15 +47,38 @@ const clientConfig =
 const bot = new Bot<AppContext>(config.BOT_TOKEN, clientConfig);
 
 // 3. Redis и сессии (первыми!)
+let shuttingDown = false;
+
 const redisClient = new Redis({
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
   password: config.REDIS_PASSWORD,
+  // Namespace ключей: разные боты и окружения на одном Redis не пересекаются.
+  keyPrefix: config.REDIS_KEY_PREFIX,
+  // Политика fail-fast: при обрыве команды не висят в offline-очереди,
+  // а сразу падают в обработку ошибок. Если нужно «молча ждать реконнекта» —
+  // убери эти две строки.
+  enableOfflineQueue: false,
+  maxRetriesPerRequest: 2,
+});
+
+// ioredis эмитит 'error' только при наличии слушателя — без него ошибки невидимы.
+redisClient.on('error', (error: Error) => {
+  logger.error('Redis: ошибка соединения', { error });
+});
+redisClient.on('ready', () => {
+  logger.info('Redis: соединение готово');
+});
+redisClient.on('reconnecting', (delay: number) => {
+  logger.warn('Redis: переподключение', { delayMs: delay });
+});
+redisClient.on('end', () => {
+  if (!shuttingDown) logger.warn('Redis: соединение закрыто');
 });
 
 const storage = new RedisAdapter({
   instance: redisClient,
-  ttl: 60 * 60 * 24, // 24 часа
+  ttl: 60 * 60 * 24, // 24 часа (секунды; обновляется при каждой записи сессии)
 });
 
 bot.use(
@@ -149,21 +172,50 @@ bot.command('start', async (ctx) => {
 // 8. Middleware менеджера диалогов
 bot.use(manager.middleware());
 
-// 9. Глобальный обработчик ошибок
+// 9. Глобальный обработчик ошибок. Без него grammY останавливает polling
 bot.catch((err) => {
   logger.error(`Глобальная ошибка бота на апдейте ${err.ctx.update.update_id}:`, {
     error: err.error,
   });
 });
 
-// 10. Запуск
+// 10. Graceful shutdown
+const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return; // повторный Ctrl+C не запускает остановку дважды
+  shuttingDown = true;
+  logger.info(`Получен ${signal}, останавливаюсь...`);
+
+  // Страховка: если остановка зависла, не держим процесс вечно.
+  const forceExit = setTimeout(() => {
+    logger.error('Graceful shutdown завис, принудительный выход');
+    process.exit(1);
+  }, 10_000);
+  forceExit.unref();
+
+  try {
+    // Сначала перестаём принимать апдейты, потом закрываем хранилище.
+    await bot.stop();
+    await redisClient.quit();
+    logger.info('Бот остановлен, Redis-соединение закрыто');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Ошибка при остановке', { error });
+    process.exit(1);
+  }
+};
+
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+// 11. Запуск. Ошибка старта (например, нет сети до Telegram) попадёт в лог
 bot
   .start({
     onStart: (botInfo) => {
       logger.info(`🤖 Bot @${botInfo.username} successfully started and ready for requests!`);
     },
   })
-  .catch((error) => {
-    logger.error(`Не удалось запустить бота`, { error });
+  .catch(async (error) => {
+    logger.error('Не удалось запустить бота', { error });
+    await redisClient.quit().catch(() => { });
     process.exit(1);
   });

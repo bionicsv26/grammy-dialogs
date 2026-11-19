@@ -7,10 +7,12 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   BOT_TOKEN: z.string().min(1, 'Токен Telegram обязателен'),
   HTTPS_PROXY: z.url('HTTPS_PROXY должен быть валидным URL').default('http://127.0.0.1:3067'),
+  REDIS_KEY_PREFIX: z.string().default('tgbot:'),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().min(1, 'Пароль Redis обязателен'),
   ADMIN_CHAT_ID: z.coerce.number().default(0),
+
 
   // 👥 Список ID администраторов (строка из .env преобразуется в массив чисел)
   ADMIN_USER_IDS: z
