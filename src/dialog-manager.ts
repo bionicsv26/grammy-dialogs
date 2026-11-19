@@ -2,6 +2,7 @@ import { Bot, Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 import { logger } from './logger.js';
 import { isMessageNotModified } from './utils/telegram-errors.js';
+import { escapeForMode, type ParseMode } from './utils/parse-mode.js';
 
 // ─── Встроенные core-переводы ядра ──────────────────────────────────────────
 const coreRu = {
@@ -154,6 +155,8 @@ export interface DialogManagerOptions<
    * обрабатывается как обычный экшен окна.
    */
   rootWindowId?: TId;
+  /** Режим разметки сообщений. По умолчанию HTML. */
+  parseMode?: ParseMode;
 }
 
 /** Внутреннее стирание дженериков на границе хранения/коллекции. */
@@ -205,6 +208,7 @@ export class DialogManager<
   private rootWindowId: string | undefined;
   private handlingError = new WeakSet<object>();
   private bot: Bot<any>;
+  private parseMode: ParseMode;
 
   constructor(
     bot: Bot<DialogContext<TState>>,
@@ -214,6 +218,7 @@ export class DialogManager<
     this.errorHandler = options?.onError;
     this.defaultLang = options?.defaultLang ?? 'ru';
     this.rootWindowId = options?.rootWindowId;
+    this.parseMode = options?.parseMode ?? 'HTML';
 
     // Core-дефолты как база; пользовательские переводы перекрывают их.
     const merged: Record<string, Record<string, string>> = {};
@@ -276,7 +281,7 @@ export class DialogManager<
       // RegExp из ключей не строится.
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
-          ? String(params[name])
+          ? escapeForMode(String(params[name]), this.parseMode)
           : match
       );
     };
@@ -481,8 +486,8 @@ export class DialogManager<
         }
       }
 
-      const otherOptions: { parse_mode: 'Markdown'; reply_markup?: InlineKeyboard } = {
-        parse_mode: 'Markdown',
+      const otherOptions: { parse_mode: ParseMode; reply_markup?: InlineKeyboard } = {
+        parse_mode: this.parseMode,
       };
       if (keyboard) {
         otherOptions.reply_markup = keyboard;

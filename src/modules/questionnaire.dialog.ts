@@ -8,7 +8,7 @@ import {
   createInterestsSchema,
 } from '../schemas/questionnaire.schema.js';
 import { isUserAdmin } from '../utils/auth.js';
-import { escapeMarkdown } from '../utils/markdown.js';
+import { escapeHtml } from '../utils/parse-mode.js';
 import type { AppTranslationKeys } from '../translations.js';
 import type { CoreWindowId } from './core.dialog.js';
 
@@ -76,7 +76,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
 
         let text = t('ask_name_text');
         if (error) {
-          text = `❌ *${escapeMarkdown(error)}*\n\n` + text;
+          text = `❌ <b>${escapeHtml(error)}</b>\n\n` + text;
         }
 
         return { text, keyboard };
@@ -179,8 +179,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
         return true;
       },
       render: async (ctx, t) => {
-        const rawName = ctx.session.data.name || t('anonymous');
-        const name = escapeMarkdown(rawName);
+        const name = ctx.session.data.name || t('anonymous');
         const interestIdsList = ctx.session.data.interests ?? [];
 
         const interestLabels = interestIdsList
@@ -188,7 +187,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
             const key = `tech_${id}` as AppTranslationKeys;
             const translated = t(key);
             const fallback = AVAILABLE_INTERESTS.find((i) => i.id === id)?.label;
-            return translated !== key ? translated : escapeMarkdown(fallback || id);
+            return translated !== key ? translated : (fallback || id);
           })
           .filter(Boolean)
           .join(', ');
@@ -221,7 +220,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
           if (adminChatId) {
             try {
               const rawName = ctx.session.data.name || t('anonymous');
-              const name = escapeMarkdown(rawName);
+              const name = escapeHtml(rawName);
               const interestIdsList = ctx.session.data.interests ?? [];
 
               const interestLabels = interestIdsList
@@ -229,23 +228,23 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
                   const key = `tech_${id}` as AppTranslationKeys;
                   const translated = t(key);
                   const fallback = AVAILABLE_INTERESTS.find((i) => i.id === id)?.label;
-                  return translated !== key ? translated : escapeMarkdown(fallback || id);
+                  return translated !== key ? translated : escapeHtml(fallback || id);
                 })
                 .filter(Boolean)
                 .join(', ');
 
               const userId = ctx.from?.id;
               const rawUsername = ctx.from?.username ? `@${ctx.from.username}` : t('hidden');
-              const username = escapeMarkdown(rawUsername);
+              const username = escapeHtml(rawUsername);
 
               const adminMessage =
-                `🚨 *Новая заполненная анкета!*\n\n` +
-                `👤 *Имя:* ${name}\n` +
-                `🔗 *Пользователь:* ${username} (ID: \`${userId}\`)\n` +
-                `💻 *Технологии:* ${interestLabels || t('none_selected')}\n` +
-                `📅 *Дата:* ${new Date().toLocaleString('ru-RU')}`;
+                `🚨 <b>Новая заполненная анкета!</b>\n\n` +
+                `👤 <b>Имя:</b> ${name}\n` +
+                `🔗 <b>Пользователь:</b> ${username} (ID: <code>${userId}</code>)\n` +
+                `💻 <b>Технологии:</b> ${interestLabels || t('none_selected')}\n` +
+                `📅 <b>Дата:</b> ${new Date().toLocaleString('ru-RU')}`;
 
-              await ctx.api.sendMessage(adminChatId, adminMessage, { parse_mode: 'Markdown' });
+              await ctx.api.sendMessage(adminChatId, adminMessage, { parse_mode: 'HTML' });
 
               logger.info(`📤 Анкета успешно отправлена администратору в чат ${adminChatId}`, { userId });
             } catch (error) {
