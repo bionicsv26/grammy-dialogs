@@ -529,6 +529,12 @@ export class DialogManager<
     ): Promise<void> => {
       try {
         const userId = ctx.from?.id;
+
+        // Апдейты без чата (например, inline-callback) не имеют сессии.
+        if (!ctx.session) {
+          return next();
+        }
+
         const windowId = ctx.session.currentWindow;
         if (!windowId) {
           return next();

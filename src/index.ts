@@ -1,4 +1,5 @@
 import { Bot, session } from 'grammy';
+import { sequentialize } from '@grammyjs/runner';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { Redis } from 'ioredis';
 import { RedisAdapter } from '@grammyjs/storage-redis';
@@ -81,8 +82,17 @@ const storage = new RedisAdapter({
   ttl: 60 * 60 * 24, // 24 часа (секунды; обновляется при каждой записи сессии)
 });
 
+// Ключ вычисляется ДО появления ctx.session — тип контекста без session.
+const sessionKey = (ctx: Omit<AppContext, 'session'>): string | undefined =>
+  ctx.chat?.id.toString();
+
+// Сериализация апдейтов по чату: защита read-modify-write сессии.
+// ДОЛЖНА стоять до session — иначе не защищает её.
+bot.use(sequentialize((ctx) => sessionKey(ctx) ?? 'no-chat'));
+
 bot.use(
   session({
+    getSessionKey: sessionKey,
     initial: (): DialogSession<AppState> => ({
       data: {} as DialogSession<AppState>['data'],
       lang: 'ru',
@@ -130,7 +140,7 @@ bot.use(async (ctx, next) => {
   }
 });
 
-// 5. DialogManager с i18n
+// 5. DialogManager с i18n (parseMode по умолчанию HTML)
 const manager = new DialogManager<AppState, AppWindowId, AppTranslationKeys>(bot, {
   translations,
   defaultLang: 'ru',
@@ -210,6 +220,9 @@ process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 // 11. Запуск. Ошибка старта (например, нет сети до Telegram) попадёт в лог
 bot
   .start({
+    // Только те типы, которые реально обрабатываем.
+    // Добавишь обработчик другого типа — допиши его сюда, иначе он не сработает.
+    allowed_updates: ['message', 'callback_query'],
     onStart: (botInfo) => {
       logger.info(`🤖 Bot @${botInfo.username} successfully started and ready for requests!`);
     },
