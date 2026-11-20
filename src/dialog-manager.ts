@@ -104,6 +104,12 @@ export type WindowInputHandler<
   value: TValue
 ) => Promise<void> | void;
 
+/**
+ * Guard — чистый предикат доступа: читает состояние и решает
+ * «пустить / заблокировать / редиректить». Без сайд-эффектов
+ * (ответов на callback, отправки сообщений, мутаций сессии):
+ * вызывается на двух гейтах — перед обработкой ввода/экшена и перед рендером.
+ */
 export type WindowGuard<
   TState extends Record<string, any>,
   TId extends string,
@@ -135,28 +141,34 @@ export interface WindowConfig<
   disableBackButton?: boolean;
 }
 
+
 export interface DialogManagerOptions<
-  TState extends Record<string, any>,
+  TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
   TKeys extends string = string
 > {
-  onError?: (
+  onError?:
+  | ((
     error: unknown,
     ctx: DialogContext<TState>,
     manager: DialogManager<TState, TId, TKeys>
-  ) => Promise<void> | void;
-  translations?: Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>;
-  defaultLang?: string;
+  ) => Promise<void> | void)
+  | undefined;
+  translations?:
+  | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
+  | undefined;
+  defaultLang?: string | undefined;
   /**
    * Корень навигации («главное меню»):
    * - переход в это окно очищает историю;
    * - встроенный экшен global_back_to_menu ведёт сюда.
-   * Если не задан — спецобработка отключена, global_back_to_menu
-   * обрабатывается как обычный экшен окна.
+   * Если не задан — спецобработка отключена.
    */
-  rootWindowId?: TId;
+  rootWindowId?: TId | undefined;
   /** Режим разметки сообщений. По умолчанию HTML. */
-  parseMode?: ParseMode;
+  parseMode?: ParseMode | undefined;
+  /** Лимит вложенных переходов на один апдейт (защита от циклов guard-редиректов). */
+  maxNavigationDepth?: number | undefined;
 }
 
 /** Внутреннее стирание дженериков на границе хранения/коллекции. */
@@ -209,6 +221,8 @@ export class DialogManager<
   private handlingError = new WeakSet<object>();
   private bot: Bot<any>;
   private parseMode: ParseMode;
+  private maxNavigationDepth: number;
+  private navDepth = new WeakMap<object, number>();
 
   constructor(
     bot: Bot<DialogContext<TState>>,
@@ -219,6 +233,7 @@ export class DialogManager<
     this.defaultLang = options?.defaultLang ?? 'ru';
     this.rootWindowId = options?.rootWindowId;
     this.parseMode = options?.parseMode ?? 'HTML';
+    this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
 
     // Core-дефолты как база; пользовательские переводы перекрывают их.
     const merged: Record<string, Record<string, string>> = {};
@@ -362,8 +377,22 @@ export class DialogManager<
     }
   }
 
-  async goTo(ctx: DialogContext<TState>, windowId: TId): Promise<void> {
+  async goTo(
+    ctx: DialogContext<TState>,
+    windowId: TId,
+    options: { pushHistory?: boolean } = {}
+  ): Promise<void> {
+    // Глубина считается на апдейт (ctx живёт ровно один апдейт).
+    const depth = this.navDepth.get(ctx) ?? 0;
+    this.navDepth.set(ctx, depth + 1);
     try {
+      if (depth >= this.maxNavigationDepth) {
+        throw new Error(
+          `Navigation depth limit (${this.maxNavigationDepth}) exceeded at window "${windowId}". ` +
+          `Possible guard redirect cycle.`
+        );
+      }
+
       if (!this.windows.has(windowId)) {
         logger.error(`Attempted to navigate to unregistered window`, {
           userId: ctx.from?.id,
@@ -381,10 +410,9 @@ export class DialogManager<
       }
 
       // Переход в корень навигации начинает её заново.
-      // Если rootWindowId не задан, сравнение всегда false.
       if (windowId === this.rootWindowId) {
         ctx.session.history = [];
-      } else if (currentWindow) {
+      } else if (options.pushHistory !== false && currentWindow) {
         ctx.session.history.push(currentWindow);
       }
 
@@ -399,6 +427,8 @@ export class DialogManager<
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
+    } finally {
+      this.navDepth.set(ctx, depth);
     }
   }
 
@@ -455,7 +485,7 @@ export class DialogManager<
             fromWindow: windowId,
             toWindow: guardResult,
           });
-          await this.goTo(ctx, guardResult);
+          await this.goTo(ctx, guardResult, { pushHistory: false });
           return;
         }
       }
@@ -564,7 +594,7 @@ export class DialogManager<
               fromWindow: windowId,
               toWindow: guardResult,
             });
-            await this.goTo(ctx, guardResult);
+            await this.goTo(ctx, guardResult, { pushHistory: false });
             return;
           }
         }

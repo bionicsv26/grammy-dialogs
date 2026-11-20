@@ -265,15 +265,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
     // Админ-панель
     {
       id: 'admin_panel',
-      guard: async (ctx, _manager, t) => {
-        if (!isUserAdmin(ctx.from?.id)) {
-          await ctx
-            .answerCallbackQuery({ text: t('no_admin_access'), show_alert: true })
-            .catch(() => { });
-          return 'main_menu';
-        }
-        return true;
-      },
+      guard: (ctx) => (isUserAdmin(ctx.from?.id) ? true : 'main_menu'),
       render: async (_ctx, t) => {
         const keyboard = new InlineKeyboard()
           .text(t('btn_stats'), 'open_stats').row()

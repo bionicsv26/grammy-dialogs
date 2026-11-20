@@ -99,4 +99,45 @@ describe('DialogManager', () => {
     expect(() => h.manager.register(w('dup1', { '__dm:x': () => { } }))).toThrow(/reserved namespace/);
     expect(() => h.manager.register(w('dup2', { ['x'.repeat(65)]: () => { } }))).toThrow(/64 bytes/);
   });
+
+  it('guard-редирект не засоряет историю и не ломает «Назад»', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_guarded');
+
+    expect(h.session()?.currentWindow).toBe('target');
+    expect(h.session()?.history).toEqual(['root']); // 'guarded' в стек не попал
+
+    await h.click(coreCallbacks.back);
+    expect(h.session()?.currentWindow).toBe('root');
+  });
+
+  it('цикл guard-редиректов ограничен и уходит в onError, а не зависает', async () => {
+    const errors: unknown[] = [];
+    const h = await createHarness(undefined, {
+      maxNavigationDepth: 3,
+      onError: (error) => { errors.push(error); },
+    });
+
+    await h.sendText('/start');
+    await h.click('to_cycle');
+
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/Navigation depth limit/i);
+  });
+
+  it('guard=false блокирует экшен: хендлер не выполняется', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_blocked'); // currentWindow станет 'blocked', рендера не будет
+
+    expect(h.session()?.currentWindow).toBe('blocked');
+    h.reset();
+
+    await h.click('should_not_run');
+
+    expect(h.session()?.data.name).toBeUndefined();
+    expect(h.methods()).toContain('answerCallbackQuery');
+    expect(h.methods()).not.toContain('editMessageText');
+  });
 });

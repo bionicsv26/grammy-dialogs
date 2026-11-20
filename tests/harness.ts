@@ -15,12 +15,15 @@ export interface TestState {
   name?: string;
 }
 
-export const testIds = ['root', 'form', 'confirm', 'guarded', 'target'] as const;
+export const testIds = [
+  'root', 'form', 'confirm', 'guarded', 'target', 'cycle_a', 'cycle_b', 'blocked',
+] as const;
 export type TestId = (typeof testIds)[number];
 
 export type TestKeys =
   | 'root_text' | 'form_text' | 'confirm_text' | 'guarded_text' | 'target_text'
-  | 'btn_next' | 'btn_guard' | 'btn_noop';
+  | 'cycle_a_text' | 'cycle_b_text' | 'blocked_text'
+  | 'btn_next' | 'btn_guard' | 'btn_noop' | 'btn_cycle' | 'btn_blocked';
 
 export type TestCtx = DialogContext<TestState>;
 
@@ -30,11 +33,15 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
     guarded_text: 'Защищено', target_text: 'Цель',
     btn_next: 'Дальше', btn_guard: 'В защищённое', btn_noop: 'Обновить',
     // btn_back НАМЕРЕННО отсутствует — проверяем core-дефолт
+    cycle_a_text: 'Цикл A', cycle_b_text: 'Цикл B', blocked_text: 'Закрыто',
+    btn_cycle: 'В цикл', btn_blocked: 'В закрытое',
   },
   en: {
     root_text: 'Root', form_text: 'Form', confirm_text: 'Done: {name}',
     guarded_text: 'Guarded', target_text: 'Target',
     btn_next: 'Next', btn_guard: 'To guarded', btn_noop: 'Refresh',
+    cycle_a_text: 'Cycle A', cycle_b_text: 'Cycle B', blocked_text: 'Blocked',
+    btn_cycle: 'To cycle', btn_blocked: 'To blocked',
   },
 };
 
@@ -49,11 +56,16 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
         keyboard: new InlineKeyboard()
           .text(t('btn_next'), 'next')
           .row()
-          .text(t('btn_guard'), 'to_guarded'),
+          .text(t('btn_guard'), 'to_guarded')
+          .row()
+          .text(t('btn_cycle'), 'to_cycle')
+          .text(t('btn_blocked'), 'to_blocked'),
       }),
       actions: {
         next: (ctx, m) => m.goTo(ctx, 'form'),
         to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
+        to_cycle: (ctx, m) => m.goTo(ctx, 'cycle_a'),
+        to_blocked: (ctx, m) => m.goTo(ctx, 'blocked'),
       },
     },
     win({
@@ -82,6 +94,24 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
       id: 'target',
       render: (_ctx, t) => ({ text: t('target_text') }),
     },
+    {
+      id: 'cycle_a',
+      guard: () => 'cycle_b' as const,
+      render: (_ctx, t) => ({ text: t('cycle_a_text') }),
+    },
+    {
+      id: 'cycle_b',
+      guard: () => 'cycle_a' as const,
+      render: (_ctx, t) => ({ text: t('cycle_b_text') }),
+    },
+    {
+      id: 'blocked',
+      guard: () => false,
+      render: (_ctx, t) => ({ text: t('blocked_text') }),
+      actions: {
+        should_not_run: (ctx) => { ctx.session.data.name = 'HACKED'; },
+      },
+    },
   ]);
 }
 
@@ -107,7 +137,12 @@ const BOT_USER = {
 
 export async function createHarness(
   windows: readonly WindowConfig<TestState, TestId, TestKeys, any>[] = baseWindows(),
-  options: { rootWindowId?: TestId; translations?: typeof testTranslations } = {}
+  options: {
+    rootWindowId?: TestId;
+    translations?: typeof testTranslations;
+    maxNavigationDepth?: number;
+    onError?: (error: unknown, ctx: TestCtx, manager: DialogManager<TestState, TestId, TestKeys>) => void | Promise<void>;
+  } = {}
 ) {
   const calls: ApiCall[] = [];
   let messageId = 1000;
@@ -165,6 +200,8 @@ export async function createHarness(
     translations: options.translations ?? testTranslations,
     defaultLang: 'ru',
     rootWindowId: options.rootWindowId ?? 'root',
+    maxNavigationDepth: options.maxNavigationDepth,
+    onError: options.onError,
   });
   manager.registerAll(windows);
 

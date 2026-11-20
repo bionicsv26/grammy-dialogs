@@ -48,7 +48,13 @@ export function createCoreWindows<TState extends CoreState>() {
         proceed_to_branches: async (ctx, manager) => {
           await manager.goTo(ctx, 'select_branch');
         },
-        open_admin: async (ctx, manager) => {
+        open_admin: async (ctx, manager, t) => {
+          if (!isUserAdmin(ctx.from?.id)) {
+            await ctx
+              .answerCallbackQuery({ text: t('no_admin_access'), show_alert: true })
+              .catch(() => { });
+            return;
+          }
           await manager.goTo(ctx, 'admin_panel');
         },
         open_settings_lang: async (ctx, manager) => {
