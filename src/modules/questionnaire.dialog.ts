@@ -242,7 +242,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
                 `👤 <b>Имя:</b> ${name}\n` +
                 `🔗 <b>Пользователь:</b> ${username} (ID: <code>${userId}</code>)\n` +
                 `💻 <b>Технологии:</b> ${interestLabels || t('none_selected')}\n` +
-                `📅 <b>Дата:</b> ${new Date().toLocaleString('ru-RU')}`;
+                `📅 <b>Дата:</b> ${new Date().toLocaleString('ru-RU', { timeZone: config.TIME_ZONE })}`;
 
               await ctx.api.sendMessage(adminChatId, adminMessage, { parse_mode: 'HTML' });
 

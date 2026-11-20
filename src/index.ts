@@ -11,6 +11,7 @@ import {
 import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { describeText } from './utils/log-privacy.js';
 import {
   createCoreWindows,
   type CoreState,
@@ -107,17 +108,18 @@ bot.use(async (ctx, next) => {
     ? Object.keys(ctx.update).filter((k) => k !== 'update_id')[0]
     : 'unknown';
   const userId = ctx.from?.id;
-  const username = ctx.from?.username || ctx.from?.first_name || 'Аноним';
   const currentWindow = ctx.session?.currentWindow || 'unknown';
   const callbackData = ctx.callbackQuery?.data;
-  const userInputText = ctx.message?.text;
+  const inputInfo = describeText(ctx.message?.text, config.LOG_USER_TEXT);
 
   logger.info(`📥 Входящее обновление [${updateType}]`, {
     userId,
-    username,
+    ...(config.LOG_USER_TEXT === 'full' && {
+      username: ctx.from?.username ?? ctx.from?.first_name,
+    }),
     currentWindow,
     ...(callbackData && { action: callbackData }),
-    ...(userInputText && { input: userInputText }),
+    ...(inputInfo && { input: inputInfo }),
   });
 
   const start = Date.now();

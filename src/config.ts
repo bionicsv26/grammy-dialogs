@@ -28,6 +28,28 @@ const envSchema = z.object({
       .optional()
   ),
 
+  // Приватность логов: off — только метаданные, preview — первые символы, full — текст.
+  LOG_USER_TEXT: z.preprocess(
+    emptyToUndefined,
+    z.enum(['off', 'preview', 'full']).default('off')
+  ),
+
+  // Явная IANA-зона для дат в сообщениях (иначе берётся TZ сервера).
+  TIME_ZONE: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .default('UTC')
+      .refine((tz) => {
+        try {
+          new Intl.DateTimeFormat('ru-RU', { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'TIME_ZONE должен быть валидной IANA-зоной (например, Europe/Moscow)')
+  ),
+
   REDIS_HOST: z.preprocess(emptyToUndefined, z.string().min(1).default('localhost')),
   REDIS_PORT: z.preprocess(
     emptyToUndefined,

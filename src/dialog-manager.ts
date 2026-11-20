@@ -665,7 +665,7 @@ export class DialogManager<
                 userId,
                 windowId,
                 error: firstError,
-                rawInput,
+                inputLength: rawInput.length,
               });
 
               ctx.session.data.error = firstError;
