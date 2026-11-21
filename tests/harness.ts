@@ -31,16 +31,16 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
   ru: {
     root_text: 'Корень', form_text: 'Форма', confirm_text: 'Готово: {name}',
     guarded_text: 'Защищено', target_text: 'Цель',
-    btn_next: 'Дальше', btn_guard: 'В защищённое', btn_noop: 'Обновить',
-    // btn_back НАМЕРЕННО отсутствует — проверяем core-дефолт
     cycle_a_text: 'Цикл A', cycle_b_text: 'Цикл B', blocked_text: 'Закрыто',
+    btn_next: 'Дальше', btn_guard: 'В защищённое', btn_noop: 'Обновить',
     btn_cycle: 'В цикл', btn_blocked: 'В закрытое',
+    // btn_back НАМЕРЕННО отсутствует — проверяем core-дефолт
   },
   en: {
     root_text: 'Root', form_text: 'Form', confirm_text: 'Done: {name}',
     guarded_text: 'Guarded', target_text: 'Target',
-    btn_next: 'Next', btn_guard: 'To guarded', btn_noop: 'Refresh',
     cycle_a_text: 'Cycle A', cycle_b_text: 'Cycle B', blocked_text: 'Blocked',
+    btn_next: 'Next', btn_guard: 'To guarded', btn_noop: 'Refresh',
     btn_cycle: 'To cycle', btn_blocked: 'To blocked',
   },
 };
@@ -66,6 +66,9 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
         to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
         to_cycle: (ctx, m) => m.goTo(ctx, 'cycle_a'),
         to_blocked: (ctx, m) => m.goTo(ctx, 'blocked'),
+        alert: async (ctx) => {
+          await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
+        },
       },
     },
     win({
@@ -141,7 +144,11 @@ export async function createHarness(
     rootWindowId?: TestId;
     translations?: typeof testTranslations;
     maxNavigationDepth?: number;
-    onError?: (error: unknown, ctx: TestCtx, manager: DialogManager<TestState, TestId, TestKeys>) => void | Promise<void>;
+    onError?: (
+      error: unknown,
+      ctx: TestCtx,
+      manager: DialogManager<TestState, TestId, TestKeys>
+    ) => void | Promise<void>;
   } = {}
 ) {
   const calls: ApiCall[] = [];
@@ -219,7 +226,7 @@ export async function createHarness(
       ? [{
         type: 'bot_command' as const,
         offset: 0,
-        length: (text.split(/[\s@]/)[0] ?? text).length, // '/start@my_bot payload' → '/start'
+        length: (text.split(/[\s@]/)[0] ?? text).length,
       }]
       : undefined;
 

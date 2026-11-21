@@ -141,7 +141,6 @@ export interface WindowConfig<
   disableBackButton?: boolean;
 }
 
-
 export interface DialogManagerOptions<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
@@ -159,9 +158,8 @@ export interface DialogManagerOptions<
   | undefined;
   defaultLang?: string | undefined;
   /**
-   * Корень навигации («главное меню»):
-   * - переход в это окно очищает историю;
-   * - встроенный экшен global_back_to_menu ведёт сюда.
+   * Корень навигации: переход в это окно очищает историю,
+   * встроенный экшен coreCallbacks.root ведёт сюда.
    * Если не задан — спецобработка отключена.
    */
   rootWindowId?: TId | undefined;
@@ -211,18 +209,18 @@ export class DialogManager<
   TId extends string = string,
   TKeys extends string = string
 > {
-  // Все приватные поля намеренно не зависят от TState/TId/TKeys,
+  // Приватные поля намеренно не зависят от TState/TId/TKeys,
   // чтобы разные инстанциации класса были структурно совместимы.
   private windows = new Map<string, AnyWindowConfig>();
   private errorHandler: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
   private defaultLang: string;
   private rootWindowId: string | undefined;
-  private handlingError = new WeakSet<object>();
-  private bot: Bot<any>;
   private parseMode: ParseMode;
   private maxNavigationDepth: number;
   private navDepth = new WeakMap<object, number>();
+  private handlingError = new WeakSet<object>();
+  private bot: Bot<any>;
 
   constructor(
     bot: Bot<DialogContext<TState>>,
@@ -291,9 +289,9 @@ export class DialogManager<
 
       if (!params) return text;
 
-      // Один проход: функция-замена вставляет значение литерально
-      // (никаких $-паттернов), вставленное не пересканируется,
-      // RegExp из ключей не строится.
+      // Один проход: значение вставляется литерально (без $-паттернов),
+      // не пересканируется, RegExp из ключей не строится; параметры
+      // экранируются под текущий parse_mode.
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
           ? escapeForMode(String(params[name]), this.parseMode)
@@ -325,6 +323,15 @@ export class DialogManager<
       result.row().text(text, coreCallbacks.back);
     }
     return result;
+  }
+
+  /** Единая точка ответа на callback: inline пропускаем, ошибки глотаем. */
+  private async answerCallback(
+    ctx: DialogContext<TState>,
+    other?: Parameters<DialogContext<TState>['answerCallbackQuery']>[0]
+  ): Promise<void> {
+    if (!ctx.callbackQuery || ctx.callbackQuery.inline_message_id) return;
+    await ctx.answerCallbackQuery(other).catch(() => { });
   }
 
   private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
@@ -565,6 +572,20 @@ export class DialogManager<
           return next();
         }
 
+        // Telegram принимает ответ на callback query только один раз.
+        // Оборачиваем метод, чтобы повторные ответы (хендлер + finally)
+        // не превращались в лишние вызовы API.
+        if (ctx.callbackQuery) {
+          const original = ctx.answerCallbackQuery.bind(ctx);
+          let answered = false;
+          ctx.answerCallbackQuery = async (other?: Parameters<typeof original>[0]) => {
+            if (answered) return true;
+            const result = await original(other);
+            answered = true; // помечаем только после успеха
+            return result;
+          };
+        }
+
         const windowId = ctx.session.currentWindow;
         if (!windowId) {
           return next();
@@ -583,9 +604,7 @@ export class DialogManager<
           const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
             logger.warn(`Window guard blocked middleware action`, { userId, windowId });
-            if (ctx.callbackQuery) {
-              await ctx.answerCallbackQuery().catch(() => { });
-            }
+            await this.answerCallback(ctx);
             return;
           }
           if (typeof guardResult === 'string' && guardResult !== windowId) {
@@ -609,9 +628,7 @@ export class DialogManager<
             try {
               await this.goBack(ctx);
             } finally {
-              if (!ctx.callbackQuery.inline_message_id) {
-                await ctx.answerCallbackQuery().catch(() => { });
-              }
+              await this.answerCallback(ctx);
             }
             return;
           }
@@ -620,9 +637,7 @@ export class DialogManager<
             try {
               await this.goTo(ctx, this.rootWindowId as TId);
             } finally {
-              if (!ctx.callbackQuery.inline_message_id) {
-                await ctx.answerCallbackQuery().catch(() => { });
-              }
+              await this.answerCallback(ctx);
             }
             return;
           }
@@ -632,11 +647,9 @@ export class DialogManager<
             try {
               await this.setLanguage(ctx, newLang);
             } finally {
-              if (!ctx.callbackQuery.inline_message_id) {
-                await ctx
-                  .answerCallbackQuery({ text: this.getTranslator(ctx)('language_changed') })
-                  .catch(() => { });
-              }
+              await this.answerCallback(ctx, {
+                text: this.getTranslator(ctx)('language_changed'),
+              });
             }
             return;
           }
@@ -645,9 +658,7 @@ export class DialogManager<
 
           if (!actionHandler) {
             logger.warn(`Action handler not found`, { userId, windowId, actionKey });
-            await ctx
-              .answerCallbackQuery({ text: t('action_not_available') })
-              .catch(() => { });
+            await this.answerCallback(ctx, { text: t('action_not_available') });
             return next();
           }
 
@@ -662,9 +673,7 @@ export class DialogManager<
             });
             await this.handleError(error, ctx);
           } finally {
-            if (!ctx.callbackQuery.inline_message_id) {
-              await ctx.answerCallbackQuery().catch(() => { });
-            }
+            await this.answerCallback(ctx);
           }
           return;
         }
