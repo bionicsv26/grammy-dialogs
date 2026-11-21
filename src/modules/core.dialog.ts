@@ -1,12 +1,7 @@
 import { InlineKeyboard } from 'grammy';
-import { defineDialog, coreCallbacks, type DialogFrame } from '../dialog-manager.js';
+import { defineDialog, coreCallbacks } from '../dialog-manager.js';
 import { isUserAdmin } from '../utils/auth.js';
 import type { AppTranslationKeys } from '../translations.js';
-
-export interface CoreState {
-  /** Saved-фрейм для возврата из confirm_restart. Уйдёт в подшаге 3.1b (вложенность). */
-  savedFrame?: DialogFrame;
-}
 
 export const coreWindowIds = [
   'main_menu', 'completed', 'confirm_restart', 'settings_lang',
@@ -14,7 +9,7 @@ export const coreWindowIds = [
 export type CoreWindowId = typeof coreWindowIds[number];
 
 export function createCoreDialog() {
-  return defineDialog<CoreState, CoreWindowId, AppTranslationKeys>({
+  return defineDialog<Record<string, any>, CoreWindowId, AppTranslationKeys>({
     id: 'core',
     entry: 'main_menu',
     windows: [
@@ -34,6 +29,10 @@ export function createCoreDialog() {
           }
 
           return { text: t('main_menu_text'), keyboard };
+        },
+        onDialogResult: async (ctx, m, _t, result) => {
+          if (result === 'completed') await m.goTo(ctx, 'completed');
+          else await m.show(ctx);
         },
         actions: {
           to_form: (ctx, m) => m.startDialog(ctx, 'questionnaire'),
@@ -77,16 +76,7 @@ export function createCoreDialog() {
         }),
         actions: {
           do_restart: (ctx, m) => m.restart(ctx, 'core'),
-          cancel_restart: async (ctx, m) => {
-            const saved = ctx.data.savedFrame;
-            if (saved) {
-              // Возвращаем сохранённый фрейм целиком (окно + история + состояние).
-              ctx.session.stack = [saved];
-              await m.show(ctx);
-            } else {
-              await m.startDialog(ctx, 'core');
-            }
-          },
+          cancel_restart: (ctx, m) => m.done(ctx),
         },
       },
 

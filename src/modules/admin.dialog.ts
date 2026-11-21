@@ -29,7 +29,7 @@ export function createAdminDialog() {
             .text(t('btn_to_main_menu'), 'main_menu'),
         }),
         actions: {
-          main_menu: (ctx, m) => m.startDialog(ctx, 'core'),
+          main_menu: (ctx, m) => m.done(ctx),
           open_stats: (ctx, m) => m.goTo(ctx, 'admin_stats'),
           open_broadcast: (ctx, m) => m.goTo(ctx, 'admin_broadcast'),
         },

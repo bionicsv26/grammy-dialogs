@@ -52,7 +52,6 @@ function assertValidCallbackData(data: string, context: string): void {
 }
 
 // ─── Сессия: стек фреймов ───────────────────────────────────────────────────
-/** Один запущенный диалог: своё окно, своя история, своё состояние. */
 export interface DialogFrame {
   dialog: string;
   window: string;
@@ -67,11 +66,6 @@ export interface DialogSession {
   stack: DialogFrame[]; // последний элемент — активный диалог
 }
 
-/**
- * `data` — состояние АКТИВНОГО диалога (ссылка на frame.data).
- * Менеджер выставляет её в начале апдейта; мутации handlers
- * попадают прямо во фрейм и переживают сериализацию в Redis.
- */
 export type DialogContext<
   TState extends Record<string, any> = Record<string, any>
 > = Context & {
@@ -126,6 +120,18 @@ export type WindowGuard<
   t: TranslationFunction<TKeys>
 ) => Promise<boolean | TId> | boolean | TId;
 
+/** Вызывается у родительского окна, когда поддиалог завершился через done(). */
+export type WindowResultHandler<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> = (
+  ctx: DialogContext<TState>,
+  manager: DialogManager<TState, TId, TKeys>,
+  t: TranslationFunction<TKeys>,
+  result: unknown
+) => Promise<void> | void;
+
 export type WindowInputFormatter<TValue = string> = (rawInput: string) => TValue;
 
 /** Бросай из formatter, чтобы показать пользователю своё сообщение об ошибке. */
@@ -149,13 +155,14 @@ export interface WindowConfig<
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
   onInput?: WindowInputHandler<TState, TId, TKeys, TValue>;
+  onDialogResult?: WindowResultHandler<TState, TId, TKeys>;
   formatter?: WindowInputFormatter<TValue>;
   inputSchema?: z.ZodType<TValue>;
   guard?: WindowGuard<TState, TId, TKeys>;
   disableBackButton?: boolean;
 }
 
-// ─── Диалог: группа окон со своим состоянием ────────────────────────────────
+// ─── Диалог ─────────────────────────────────────────────────────────────────
 export interface DialogConfig<
   TState extends Record<string, any>,
   TId extends string,
@@ -174,7 +181,6 @@ export function defineDialog<
   return config;
 }
 
-/** Пер-оконный вывод TValue из inputSchema внутри диалога. */
 export function defineWindow<
   TState extends Record<string, any>,
   TId extends string,
@@ -201,11 +207,12 @@ export interface DialogManagerOptions<
   | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
   | undefined;
   defaultLang?: string | undefined;
-  /** Диалог, в который ведёт coreCallbacks.root. */
   rootDialogId?: string | undefined;
   parseMode?: ParseMode | undefined;
   maxNavigationDepth?: number | undefined;
   maxHistory?: number | undefined;
+  /** Максимальная глубина стека диалогов. По умолчанию 8. */
+  maxDialogDepth?: number | undefined;
 }
 
 type AnyWindowConfig = WindowConfig<any, any, any, any>;
@@ -226,7 +233,6 @@ export class DialogManager<
   TId extends string = string,
   TKeys extends string = string
 > {
-  // Приватные поля не зависят от дженериков — инстанциации класса совместимы.
   private dialogs = new Map<string, RegisteredDialog>();
   private errorHandler: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
@@ -235,6 +241,7 @@ export class DialogManager<
   private parseMode: ParseMode;
   private maxNavigationDepth: number;
   private maxHistory: number;
+  private maxDialogDepth: number;
   private navDepth = new WeakMap<object, number>();
   private handlingError = new WeakSet<object>();
   private bot: Bot<any>;
@@ -250,6 +257,7 @@ export class DialogManager<
     this.parseMode = options?.parseMode ?? 'HTML';
     this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
     this.maxHistory = Math.max(0, options?.maxHistory ?? 50);
+    this.maxDialogDepth = Math.max(1, options?.maxDialogDepth ?? 8);
 
     const merged: Record<string, Record<string, string>> = {};
     for (const [lang, dict] of Object.entries(coreTranslations)) {
@@ -298,14 +306,12 @@ export class DialogManager<
     return this;
   }
 
-  /** Активный фрейм (для прикладного кода и тестов). */
   public getFrame(ctx: DialogContext<any>): DialogFrame | undefined {
     const stack = ctx.session?.stack;
     if (!stack || stack.length === 0) return undefined;
     return stack[stack.length - 1];
   }
 
-  /** Привязывает ctx.data к состоянию активного фрейма. */
   private bind(ctx: DialogContext<any>): DialogFrame | undefined {
     const frame = this.getFrame(ctx);
     if (frame) ctx.data = frame.data;
@@ -395,7 +401,7 @@ export class DialogManager<
     }
   }
 
-  /** Запускает диалог, заменяя активный фрейм. Сообщение редактируется на месте. */
+  /** Кладёт фрейм поддиалога ПОВЕРХ текущего. Сообщение редактируется на месте. */
   async startDialog(
     ctx: DialogContext<TState>,
     dialogId: string,
@@ -410,20 +416,81 @@ export class DialogManager<
         throw new Error(`Entry window "${entry}" is not defined in dialog "${dialogId}".`);
       }
 
-      logger.info(`Starting dialog`, { userId: ctx.from?.id, dialogId, entry });
+      if (!ctx.session.stack) ctx.session.stack = [];
+      const stack = ctx.session.stack;
 
-      ctx.session.stack = [{
+      if (stack.length >= this.maxDialogDepth) {
+        throw new Error(
+          `Dialog stack depth limit (${this.maxDialogDepth}) exceeded when starting "${dialogId}".`
+        );
+      }
+
+      logger.info(`Starting dialog`, {
+        userId: ctx.from?.id, dialogId, entry, depth: stack.length + 1,
+      });
+
+      stack.push({
         dialog: dialogId,
         window: entry,
         history: [],
         data: {},
         ...(options.startData !== undefined && { startData: options.startData }),
-      }];
+      });
       this.bind(ctx);
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
     }
+  }
+
+  /** Завершает активный поддиалог и возвращает результат родительскому окну. */
+  async done(ctx: DialogContext<TState>, result?: unknown): Promise<void> {
+    try {
+      const stack = ctx.session.stack;
+      if (!stack || stack.length === 0) {
+        logger.warn(`Attempted to finish dialog, but stack is empty`, { userId: ctx.from?.id });
+        return;
+      }
+
+      const finished = stack.pop();
+      logger.info(`Dialog finished`, {
+        userId: ctx.from?.id, dialog: finished?.dialog, remaining: stack.length,
+      });
+
+      if (stack.length === 0) {
+        if (this.rootDialogId !== undefined) {
+          await this.resetDialog(ctx, this.rootDialogId);
+        }
+        return;
+      }
+
+      const frame = this.bind(ctx);
+      if (!frame) return;
+
+      delete ctx.data.error;
+
+      const window = this.resolveWindow(frame);
+      if (!window) return;
+
+      const t = this.getTranslator(ctx);
+      if (window.onDialogResult) {
+        await window.onDialogResult(ctx, this, t, result);
+      } else {
+        await this.show(ctx);
+      }
+    } catch (error) {
+      await this.handleError(error, ctx);
+    }
+  }
+
+  /** Очищает стек и стартует диалог заново, редактируя текущее сообщение. */
+  async resetDialog(
+    ctx: DialogContext<TState>,
+    dialogId: string,
+    options: { startData?: unknown; entry?: string } = {}
+  ): Promise<void> {
+    ctx.session.stack = [];
+    await this.startDialog(ctx, dialogId, options);
   }
 
   /** Полный сброс: снимает старую клавиатуру и шлёт новое сообщение. */
@@ -441,13 +508,12 @@ export class DialogManager<
           .catch(() => { });
       }
       delete ctx.session.messageId;
-      await this.startDialog(ctx, dialogId, options);
+      await this.resetDialog(ctx, dialogId, options);
     } catch (error) {
       await this.handleError(error, ctx);
     }
   }
 
-  /** Переход внутри активного диалога. */
   async goTo(
     ctx: DialogContext<TState>,
     windowId: TId,
@@ -655,7 +721,7 @@ export class DialogManager<
           }
 
           if (actionKey === coreCallbacks.root && this.rootDialogId !== undefined) {
-            try { await this.startDialog(ctx, this.rootDialogId); }
+            try { await this.resetDialog(ctx, this.rootDialogId); }
             finally { await this.answerCallback(ctx); }
             return;
           }

@@ -6,14 +6,13 @@ import { RedisAdapter } from '@grammyjs/storage-redis';
 import {
   DialogManager,
   type DialogContext,
-  type DialogFrame,
   type DialogSession,
 } from './dialog-manager.js';
 import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { describeText } from './utils/log-privacy.js';
-import { createCoreDialog, type CoreState } from './modules/core.dialog.js';
+import { createCoreDialog } from './modules/core.dialog.js';
 import { createQuestionnaireDialog } from './modules/questionnaire.dialog.js';
 import { createBranchingDialog } from './modules/branching.dialog.js';
 import { createAdminDialog } from './modules/admin.dialog.js';
@@ -148,12 +147,8 @@ bot.command('start', async (ctx) => {
     return;
   }
 
-  // Сохраняем фрейм целиком, чтобы вернуть окно + историю + состояние.
-  // В подшаге 3.1b это заменит вложенность (startDialog поверх + done).
-  const saved = JSON.parse(JSON.stringify(frame)) as DialogFrame;
-  await manager.startDialog(ctx, 'core');
-  (ctx.data as CoreState).savedFrame = saved;
-  await manager.goTo(ctx, 'confirm_restart');
+  // Кладём подтверждение ПОВЕРХ текущего диалога — его фрейм сохранится сам.
+  await manager.startDialog(ctx, 'core', { entry: 'confirm_restart' });
 });
 
 // 8. Middleware менеджера

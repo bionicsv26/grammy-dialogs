@@ -80,7 +80,7 @@ export function createQuestionnaireDialog() {
           await manager.goTo(ctx, returnTo ?? 'ask_interests');
         },
         actions: {
-          main_menu: (ctx, m) => m.startDialog(ctx, 'core'),
+          main_menu: (ctx, m) => m.done(ctx),
           cancel_edit_name: async (ctx, m) => {
             delete ctx.data.returnTo;
             await m.goTo(ctx, 'summary');
@@ -217,7 +217,7 @@ export function createQuestionnaireDialog() {
               logger.warn(`⚠️ ADMIN_CHAT_ID не настроен. Уведомление не отправлено.`);
             }
 
-            await manager.startDialog(ctx, 'core', { entry: 'completed' });
+            await manager.done(ctx, 'completed');
           },
           restart: (ctx, m) => m.restart(ctx, 'core'),
         },

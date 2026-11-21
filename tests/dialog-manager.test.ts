@@ -260,7 +260,7 @@ describe('DialogManager', () => {
   });
 
   // ─── Диалоги ──────────────────────────────────────────────────────────────
-  it('startDialog: заменяет фрейм, обнуляет историю и состояние', async () => {
+  it('startDialog: кладёт фрейм поверх, обнуляя историю и состояние', async () => {
     const h = await createHarness();
     await h.sendText('/start');
     await h.click('next');
@@ -305,5 +305,61 @@ describe('DialogManager', () => {
 
     expect(errors.length).toBeGreaterThan(0);
     expect(String(errors[0])).toMatch(/is not registered/);
+  });
+
+  it('вложенность: done возвращает родителя с его окном, историей и данными', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('next');
+    await h.sendText('Anna');      // main/confirm, data.name = Anna
+    await h.click('open_other');   // push other
+
+    expect(h.stack()).toHaveLength(2);
+    expect(h.frame()?.dialog).toBe('other');
+
+    await h.click('set_name');
+    expect(h.frame()?.data.name).toBe('OTHER');
+
+    await h.click('back_to_main'); // done()
+
+    expect(h.stack()).toHaveLength(1);
+    expect(h.frame()?.window).toBe('confirm');
+    expect(h.frame()?.data.name).toBe('Anna');
+    expect(h.frame()?.history).toEqual(['root', 'form']);
+  });
+
+  it('done(result): вызывает onDialogResult родительского окна', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_other');
+    await h.click('finish');
+
+    expect(h.frame()?.dialog).toBe('main');
+    expect(h.frame()?.window).toBe('target');
+  });
+
+  it('лимит глубины стека диалогов', async () => {
+    const errors: unknown[] = [];
+    const h = await createHarness(undefined, {
+      maxDialogDepth: 2,
+      onError: (e) => { errors.push(e); },
+    });
+
+    await h.sendText('/start'); // 1
+    await h.click('to_other');  // 2
+    await h.click('deeper');    // превышение
+
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/stack depth limit/i);
+  });
+
+  it('done без родителя уходит в корневой диалог', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('finish_root');
+
+    expect(h.stack()).toHaveLength(1);
+    expect(h.frame()?.dialog).toBe('main');
+    expect(h.frame()?.window).toBe('root');
   });
 });

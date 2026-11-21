@@ -67,6 +67,10 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
             .text(t('btn_cycle'), 'to_cycle')
             .text(t('btn_blocked'), 'to_blocked'),
         }),
+        onDialogResult: async (ctx, m, _t, result) => {
+          if (result === 'finish') await m.goTo(ctx, 'target');
+          else await m.show(ctx);
+        },
         actions: {
           next: (ctx, m) => m.goTo(ctx, 'form'),
           to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
@@ -77,6 +81,7 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
           alert: async (ctx) => {
             await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
           },
+          finish_root: (ctx, m) => m.done(ctx),
         },
       },
       win({
@@ -102,6 +107,7 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
       {
         id: 'confirm',
         render: (ctx, t) => ({ text: t('confirm_text', { name: ctx.data.name ?? '' }) }),
+        actions: { open_other: (ctx, m) => m.startDialog(ctx, 'other') },
       },
       {
         id: 'guarded',
@@ -141,7 +147,9 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
         render: (ctx, t) => ({ text: `${t('hello_text')}: ${ctx.data.name ?? 'empty'}` }),
         actions: {
           set_name: (ctx, m) => { ctx.data.name = 'OTHER'; return m.show(ctx); },
-          back_to_main: (ctx, m) => m.startDialog(ctx, 'main'),
+          back_to_main: (ctx, m) => m.done(ctx),
+          finish: (ctx, m) => m.done(ctx, 'finish'),
+          deeper: (ctx, m) => m.startDialog(ctx, 'other'),
         },
       },
     ],
@@ -169,6 +177,7 @@ export async function createHarness(
     translations?: typeof testTranslations;
     maxNavigationDepth?: number;
     maxHistory?: number;
+    maxDialogDepth?: number;
     onError?: (
       error: unknown,
       ctx: TestCtx,
@@ -233,6 +242,7 @@ export async function createHarness(
     rootDialogId: options.rootDialogId ?? 'main',
     maxNavigationDepth: options.maxNavigationDepth,
     maxHistory: options.maxHistory,
+    maxDialogDepth: options.maxDialogDepth,
     onError: options.onError,
   });
   for (const d of dialogs) manager.registerDialog(d);
@@ -292,6 +302,7 @@ export async function createHarness(
   return {
     bot, manager, calls,
     frame,
+    stack: () => captured?.stack ?? [],
     // Адаптер под прежние ассерты: «текущее окно / история / данные»
     session: () => {
       const f = frame();

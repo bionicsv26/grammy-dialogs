@@ -26,7 +26,7 @@ export function createBranchingDialog() {
       .text(t('btn_finish'), 'finish_flow');
 
   const branchActions: Record<string, WindowActionHandler<BranchingState, Id, AppTranslationKeys>> = {
-    finish_flow: (ctx, m) => m.startDialog(ctx, 'core', { entry: 'completed' }),
+    finish_flow: (ctx, m) => m.done(ctx, 'completed'),
   };
 
   return defineDialog<BranchingState, Id, AppTranslationKeys>({
