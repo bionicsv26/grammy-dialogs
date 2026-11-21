@@ -16,10 +16,8 @@ export interface TestState {
   name?: string;
 }
 
-export const testIds = [
-  'root', 'form', 'confirm', 'guarded', 'target', 'cycle_a', 'cycle_b', 'blocked',
-] as const;
-export type TestId = (typeof testIds)[number];
+export type TestId =
+  | 'root' | 'form' | 'confirm' | 'guarded' | 'target' | 'cycle_a' | 'cycle_b' | 'blocked';
 
 export type TestKeys =
   | 'root_text' | 'form_text' | 'confirm_text' | 'guarded_text' | 'target_text'
@@ -53,7 +51,6 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
 
   const main = defineDialog<TestState, TestId, TestKeys>({
     id: 'main',
-    entry: 'root',
     windows: [
       {
         id: 'root',
@@ -140,7 +137,6 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
 
   const other = defineDialog<TestState, 'hello', TestKeys>({
     id: 'other',
-    entry: 'hello',
     windows: [
       {
         id: 'hello',
@@ -150,6 +146,7 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
           back_to_main: (ctx, m) => m.done(ctx),
           finish: (ctx, m) => m.done(ctx, 'finish'),
           deeper: (ctx, m) => m.startDialog(ctx, 'other'),
+          record: (ctx, m) => { ctx.data.name = ctx.frame.dialog; return m.show(ctx); },
         },
       },
     ],
@@ -247,7 +244,7 @@ export async function createHarness(
   });
   for (const d of dialogs) manager.registerDialog(d);
 
-  bot.command('start', (ctx) => manager.restart(ctx, 'main'));
+  bot.command('start', (ctx) => manager.restart(ctx, options.rootDialogId ?? 'main'));
   bot.use(manager.middleware());
 
   const chatId = 100;

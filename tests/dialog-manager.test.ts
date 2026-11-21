@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { coreCallbacks, coreTranslations } from '../src/dialog-manager.js';
-import { createHarness } from './harness.js';
+import { coreCallbacks, coreTranslations, defineDialog } from '../src/dialog-manager.js';
+import { createHarness, type TestKeys, type TestState } from './harness.js';
 
 describe('DialogManager', () => {
   // ─── Навигация и рендер ───────────────────────────────────────────────────
@@ -361,5 +361,35 @@ describe('DialogManager', () => {
     expect(h.stack()).toHaveLength(1);
     expect(h.frame()?.dialog).toBe('main');
     expect(h.frame()?.window).toBe('root');
+  });
+
+  it('entry по умолчанию — первое окно', async () => {
+    const d = defineDialog<TestState, 'a' | 'b', TestKeys>({
+      id: 'noentry',
+      windows: [
+        { id: 'a', render: () => ({ text: 'A' }) },
+        { id: 'b', render: () => ({ text: 'B' }) },
+      ],
+    });
+    const h = await createHarness([d], { rootDialogId: 'noentry' });
+    await h.sendText('/start');
+
+    expect(h.frame()?.dialog).toBe('noentry');
+    expect(h.frame()?.window).toBe('a');
+  });
+
+  it('диалог без окон отклоняется', async () => {
+    const h = await createHarness();
+    expect(() => h.manager.registerDialog({ id: 'empty', windows: [] } as any))
+      .toThrow(/has no windows/);
+  });
+
+  it('ctx.frame указывает на активный фрейм', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_other');
+    await h.click('record');
+
+    expect(h.frame()?.data.name).toBe('other');
   });
 });

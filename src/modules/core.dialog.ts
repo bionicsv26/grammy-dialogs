@@ -2,16 +2,13 @@ import { InlineKeyboard } from 'grammy';
 import { defineDialog, coreCallbacks } from '../dialog-manager.js';
 import { isUserAdmin } from '../utils/auth.js';
 import type { AppTranslationKeys } from '../translations.js';
+import { D, R } from './dialog-ids.js';
 
-export const coreWindowIds = [
-  'main_menu', 'completed', 'confirm_restart', 'settings_lang',
-] as const;
-export type CoreWindowId = typeof coreWindowIds[number];
+export type CoreWindowId = 'main_menu' | 'completed' | 'confirm_restart' | 'settings_lang';
 
 export function createCoreDialog() {
   return defineDialog<Record<string, any>, CoreWindowId, AppTranslationKeys>({
-    id: 'core',
-    entry: 'main_menu',
+    id: D.core,
     windows: [
       {
         id: 'main_menu',
@@ -31,12 +28,12 @@ export function createCoreDialog() {
           return { text: t('main_menu_text'), keyboard };
         },
         onDialogResult: async (ctx, m, _t, result) => {
-          if (result === 'completed') await m.goTo(ctx, 'completed');
+          if (result === R.completed) await m.goTo(ctx, 'completed');
           else await m.show(ctx);
         },
         actions: {
-          to_form: (ctx, m) => m.startDialog(ctx, 'questionnaire'),
-          proceed_to_branches: (ctx, m) => m.startDialog(ctx, 'branching'),
+          to_form: (ctx, m) => m.startDialog(ctx, D.questionnaire),
+          proceed_to_branches: (ctx, m) => m.startDialog(ctx, D.branching),
           open_settings_lang: (ctx, m) => m.goTo(ctx, 'settings_lang'),
           open_admin: async (ctx, m, t) => {
             if (!isUserAdmin(ctx.from?.id)) {
@@ -45,7 +42,7 @@ export function createCoreDialog() {
                 .catch(() => { });
               return;
             }
-            await m.startDialog(ctx, 'admin');
+            await m.startDialog(ctx, D.admin);
           },
         },
       },
@@ -58,7 +55,7 @@ export function createCoreDialog() {
           keyboard: new InlineKeyboard().text(t('btn_fill_again'), 'restart'),
         }),
         actions: {
-          restart: (ctx, m) => m.restart(ctx, 'core'),
+          restart: (ctx, m) => m.restart(ctx, D.core),
         },
       },
 
@@ -75,7 +72,7 @@ export function createCoreDialog() {
             .text(t('btn_to_main_menu'), coreCallbacks.root),
         }),
         actions: {
-          do_restart: (ctx, m) => m.restart(ctx, 'core'),
+          do_restart: (ctx, m) => m.restart(ctx, D.core),
           cancel_restart: (ctx, m) => m.done(ctx),
         },
       },

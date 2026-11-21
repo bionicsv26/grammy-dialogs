@@ -2,20 +2,19 @@ import { InlineKeyboard } from 'grammy';
 import { defineDialog, defineWindow } from '../dialog-manager.js';
 import { isUserAdmin } from '../utils/auth.js';
 import type { AppTranslationKeys } from '../translations.js';
+import { D } from './dialog-ids.js';
 
 export interface AdminState {
   broadcastText?: string;
 }
 
-export const adminWindowIds = ['admin_panel', 'admin_stats', 'admin_broadcast'] as const;
-export type AdminWindowId = typeof adminWindowIds[number];
+export type AdminWindowId = 'admin_panel' | 'admin_stats' | 'admin_broadcast';
 
 export function createAdminDialog() {
   const win = defineWindow<AdminState, AdminWindowId, AppTranslationKeys>();
 
   return defineDialog<AdminState, AdminWindowId, AppTranslationKeys>({
-    id: 'admin',
-    entry: 'admin_panel',
+    id: 'D.admin',
     windows: [
       {
         id: 'admin_panel',

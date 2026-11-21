@@ -6,15 +6,14 @@ import {
   type WindowActionHandler,
 } from '../dialog-manager.js';
 import type { AppTranslationKeys } from '../translations.js';
+import { D, R } from './dialog-ids.js';
 
 export interface BranchingState {
   chosenBranch?: 'tech' | 'design' | 'business';
 }
 
-export const branchingWindowIds = [
-  'select_branch', 'window_tech_step', 'window_design_step', 'window_business_step',
-] as const;
-export type BranchingWindowId = typeof branchingWindowIds[number];
+export type BranchingWindowId =
+  | 'select_branch' | 'window_tech_step' | 'window_design_step' | 'window_business_step';
 
 export function createBranchingDialog() {
   type Id = BranchingWindowId;
@@ -26,12 +25,11 @@ export function createBranchingDialog() {
       .text(t('btn_finish'), 'finish_flow');
 
   const branchActions: Record<string, WindowActionHandler<BranchingState, Id, AppTranslationKeys>> = {
-    finish_flow: (ctx, m) => m.done(ctx, 'completed'),
+    finish_flow: (ctx, m) => m.done(ctx, R.completed),
   };
 
   return defineDialog<BranchingState, Id, AppTranslationKeys>({
-    id: 'branching',
-    entry: 'select_branch',
+    id: 'D.branching',
     windows: [
       {
         id: 'select_branch',

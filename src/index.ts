@@ -12,12 +12,13 @@ import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { describeText } from './utils/log-privacy.js';
+import { D } from './modules/dialog-ids.js';
 import { createCoreDialog } from './modules/core.dialog.js';
 import { createQuestionnaireDialog } from './modules/questionnaire.dialog.js';
 import { createBranchingDialog } from './modules/branching.dialog.js';
 import { createAdminDialog } from './modules/admin.dialog.js';
 
-// 1. Типы приложения: глобального состояния больше нет — оно у диалогов.
+// 1. Типы приложения: глобального состояния нет — оно принадлежит диалогам.
 export type AppContext = DialogContext<Record<string, any>>;
 
 // 2. Бот (с прокси в режиме разработки)
@@ -42,11 +43,14 @@ const redisClient = new Redis({
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
   password: config.REDIS_PASSWORD,
+  // Namespace ключей: разные боты и окружения на одном Redis не пересекаются.
   keyPrefix: config.REDIS_KEY_PREFIX,
+  // Fail-fast: при обрыве команды не висят в offline-очереди.
   enableOfflineQueue: false,
   maxRetriesPerRequest: 2,
 });
 
+// ioredis эмитит 'error' только при наличии слушателя — без него ошибки невидимы.
 redisClient.on('error', (error: Error) => {
   logger.error('Redis: ошибка соединения', { error });
 });
@@ -60,9 +64,13 @@ redisClient.on('end', () => {
 
 const storage = new RedisAdapter({ instance: redisClient, ttl: 60 * 60 * 24 });
 
-const sessionKey = (ctx: Omit<AppContext, 'session' | 'data'>): string | undefined =>
+// Ключ сессии и ключ сериализации обязаны совпадать.
+// Минимальный структурный тип: не зависит от состава контекста и вычисляется
+// до появления ctx.session / ctx.data / ctx.frame.
+const sessionKey = (ctx: { chat?: { id: number } | undefined }): string | undefined =>
   ctx.chat?.id.toString();
 
+// Сериализация апдейтов по чату: защита read-modify-write сессии. ДО session.
 bot.use(sequentialize((ctx) => sessionKey(ctx) ?? 'no-chat'));
 
 bot.use(
@@ -73,7 +81,7 @@ bot.use(
   })
 );
 
-// 4. Контекстное логирование
+// 4. Контекстное логирование (после сессий)
 bot.use(async (ctx, next) => {
   const updateType = ctx.update
     ? Object.keys(ctx.update).filter((k) => k !== 'update_id')[0]
@@ -118,10 +126,10 @@ bot.use(async (ctx, next) => {
 const manager = new DialogManager<Record<string, any>, string, AppTranslationKeys>(bot, {
   translations,
   defaultLang: 'ru',
-  rootDialogId: 'core',
+  rootDialogId: D.core,
   onError: async (error, ctx) => {
     logger.error(`Unhandled error in dialog flow`, { error, userId: ctx.from?.id });
-    await manager.restart(ctx, 'core');
+    await manager.restart(ctx, D.core);
   },
 });
 
@@ -132,13 +140,13 @@ manager
   .registerDialog(createBranchingDialog())
   .registerDialog(createAdminDialog());
 
-// 7. /start
+// 7. /start (до middleware менеджера)
 bot.command('start', async (ctx) => {
   const frame = manager.getFrame(ctx);
-  const inCore = frame?.dialog === 'core';
+  const inCore = frame?.dialog === D.core;
 
   if (!frame || (inCore && (frame.window === 'main_menu' || frame.window === 'completed'))) {
-    await manager.restart(ctx, 'core');
+    await manager.restart(ctx, D.core);
     return;
   }
 
@@ -147,14 +155,15 @@ bot.command('start', async (ctx) => {
     return;
   }
 
-  // Кладём подтверждение ПОВЕРХ текущего диалога — его фрейм сохранится сам.
-  await manager.startDialog(ctx, 'core', { entry: 'confirm_restart' });
+  // Кладём подтверждение ПОВЕРХ текущего диалога — его фрейм сохранится сам,
+  // а «Продолжить заполнение» сделает done() и вернёт окно + историю + данные.
+  await manager.startDialog(ctx, D.core, { entry: 'confirm_restart' });
 });
 
-// 8. Middleware менеджера
+// 8. Middleware менеджера диалогов
 bot.use(manager.middleware());
 
-// 9. Глобальный обработчик ошибок
+// 9. Глобальный обработчик ошибок. Без него grammY останавливает polling
 bot.catch((err) => {
   logger.error(`Глобальная ошибка бота на апдейте ${err.ctx.update.update_id}:`, {
     error: err.error,
@@ -174,6 +183,7 @@ const shutdown = async (signal: string): Promise<void> => {
   forceExit.unref();
 
   try {
+    // Сначала перестаём принимать апдейты, потом закрываем хранилище.
     await bot.stop();
     await redisClient.quit();
     logger.info('Бот остановлен, Redis-соединение закрыто');

@@ -70,6 +70,7 @@ export type DialogContext<
   TState extends Record<string, any> = Record<string, any>
 > = Context & {
   session: DialogSession;
+  frame: DialogFrame;
   data: TState & { error?: string };
 };
 
@@ -169,7 +170,8 @@ export interface DialogConfig<
   TKeys extends string = string
 > {
   id: string;
-  entry: TId;
+  /** По умолчанию — первое окно массива. */
+  entry?: TId | undefined;
   windows: readonly WindowConfig<TState, TId, TKeys, any>[];
 }
 
@@ -298,11 +300,16 @@ export class DialogManager<
       windows.set(w.id, w as AnyWindowConfig);
     }
 
-    if (!windows.has(dialog.entry)) {
-      throw new Error(`Entry window "${dialog.entry}" is not defined in dialog "${dialog.id}".`);
+    const first = dialog.windows[0];
+    if (!first) {
+      throw new Error(`Dialog "${dialog.id}" has no windows.`);
+    }
+    const entry = dialog.entry ?? first.id;
+    if (!windows.has(entry)) {
+      throw new Error(`Entry window "${entry}" is not defined in dialog "${dialog.id}".`);
     }
 
-    this.dialogs.set(dialog.id, { entry: dialog.entry, windows });
+    this.dialogs.set(dialog.id, { entry, windows });
     return this;
   }
 
@@ -314,7 +321,10 @@ export class DialogManager<
 
   private bind(ctx: DialogContext<any>): DialogFrame | undefined {
     const frame = this.getFrame(ctx);
-    if (frame) ctx.data = frame.data;
+    if (frame) {
+      ctx.frame = frame;
+      ctx.data = frame.data;
+    }
     return frame;
   }
 

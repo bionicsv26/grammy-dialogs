@@ -1,5 +1,10 @@
 import { InlineKeyboard } from 'grammy';
-import { defineDialog, defineWindow, type WindowActionHandler } from '../dialog-manager.js';
+import {
+  defineDialog,
+  defineWindow,
+  type DialogContext,
+  type WindowActionHandler,
+} from '../dialog-manager.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
@@ -9,16 +14,21 @@ import {
 } from '../schemas/questionnaire.schema.js';
 import { escapeHtml } from '../utils/parse-mode.js';
 import type { AppTranslationKeys } from '../translations.js';
+import { D, R } from './dialog-ids.js';
 
 export interface QuestionnaireState {
   name?: string;
   interests?: string[];
-  returnTo?: QuestionnaireWindowId;
   error?: string;
 }
 
-export const questionnaireWindowIds = ['ask_name', 'ask_interests', 'summary'] as const;
-export type QuestionnaireWindowId = typeof questionnaireWindowIds[number];
+export type QuestionnaireWindowId = 'ask_name' | 'ask_interests' | 'summary';
+
+/** Адрес возврата берём из стека истории, а не из состояния. */
+const cameFromSummary = (ctx: DialogContext<QuestionnaireState>): boolean => {
+  const h = ctx.frame.history;
+  return h[h.length - 1] === 'summary';
+};
 
 export function createQuestionnaireDialog() {
   type Id = QuestionnaireWindowId;
@@ -44,16 +54,15 @@ export function createQuestionnaireDialog() {
     );
 
   return defineDialog<QuestionnaireState, Id, AppTranslationKeys>({
-    id: 'questionnaire',
-    entry: 'ask_name',
+    id: D.questionnaire,
     windows: [
       win({
         id: 'ask_name',
         disableBackButton: true,
         render: (ctx, t) => {
           const error = ctx.data.error;
+          const isEditing = cameFromSummary(ctx);
 
-          const isEditing = ctx.data.returnTo === 'summary';
           const backAction = isEditing ? 'cancel_edit_name' : 'main_menu';
           const backLabel = isEditing ? t('btn_cancel') : t('btn_back');
 
@@ -71,20 +80,14 @@ export function createQuestionnaireDialog() {
             .replace(/\s+/g, ' ')
             .replace(/(^|\s)\S/g, (l) => l.toUpperCase()),
         inputSchema: nameSchema,
-        onInput: async (ctx, manager, _t, value) => {
+        onInput: async (ctx, m, _t, value) => {
           ctx.data.name = value;
-
-          const returnTo = ctx.data.returnTo;
-          delete ctx.data.returnTo;
-
-          await manager.goTo(ctx, returnTo ?? 'ask_interests');
+          if (cameFromSummary(ctx)) await m.goBack(ctx);
+          else await m.goTo(ctx, 'ask_interests');
         },
         actions: {
           main_menu: (ctx, m) => m.done(ctx),
-          cancel_edit_name: async (ctx, m) => {
-            delete ctx.data.returnTo;
-            await m.goTo(ctx, 'summary');
-          },
+          cancel_edit_name: (ctx, m) => m.goBack(ctx),
         },
       }),
 
@@ -94,7 +97,7 @@ export function createQuestionnaireDialog() {
         render: (ctx, t) => {
           if (!Array.isArray(ctx.data.interests)) ctx.data.interests = [];
           const selected: string[] = ctx.data.interests;
-          const isEditing = ctx.data.returnTo === 'summary';
+          const isEditing = cameFromSummary(ctx);
 
           const keyboard = new InlineKeyboard();
 
@@ -129,16 +132,11 @@ export function createQuestionnaireDialog() {
               return;
             }
 
-            const returnTo = ctx.data.returnTo;
-            delete ctx.data.returnTo;
-
-            await manager.goTo(ctx, returnTo ?? 'summary');
+            if (cameFromSummary(ctx)) await manager.goBack(ctx);
+            else await manager.goTo(ctx, 'summary');
           },
           ask_name: (ctx, m) => m.goTo(ctx, 'ask_name'),
-          cancel_edit_interests: async (ctx, m) => {
-            delete ctx.data.returnTo;
-            await m.goTo(ctx, 'summary');
-          },
+          cancel_edit_interests: (ctx, m) => m.goBack(ctx),
         },
       },
 
@@ -147,9 +145,8 @@ export function createQuestionnaireDialog() {
         guard: (ctx) => (ctx.data.name ? true : 'ask_name'),
         render: (ctx, t) => {
           const name = ctx.data.name || t('anonymous');
-          const interestIdsList = ctx.data.interests ?? [];
 
-          const interestLabels = interestIdsList
+          const interestLabels = (ctx.data.interests ?? [])
             .map((id) => {
               const key = `tech_${id}` as AppTranslationKeys;
               const translated = t(key);
@@ -173,14 +170,8 @@ export function createQuestionnaireDialog() {
           return { text, keyboard };
         },
         actions: {
-          edit_name: async (ctx, m) => {
-            ctx.data.returnTo = 'summary';
-            await m.goTo(ctx, 'ask_name');
-          },
-          edit_interests: async (ctx, m) => {
-            ctx.data.returnTo = 'summary';
-            await m.goTo(ctx, 'ask_interests');
-          },
+          edit_name: (ctx, m) => m.goTo(ctx, 'ask_name'),
+          edit_interests: (ctx, m) => m.goTo(ctx, 'ask_interests'),
           confirm_all: async (ctx, manager, t) => {
             const adminChatId = config.ADMIN_CHAT_ID;
 
@@ -217,9 +208,9 @@ export function createQuestionnaireDialog() {
               logger.warn(`⚠️ ADMIN_CHAT_ID не настроен. Уведомление не отправлено.`);
             }
 
-            await manager.done(ctx, 'completed');
+            await manager.done(ctx, R.completed);
           },
-          restart: (ctx, m) => m.restart(ctx, 'core'),
+          restart: (ctx, m) => m.restart(ctx, D.core),
         },
       },
     ],
