@@ -392,4 +392,23 @@ describe('DialogManager', () => {
 
     expect(h.frame()?.data.name).toBe('other');
   });
+
+  it('логгер инъектируется: события ядра попадают в переданный логгер', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+
+    expect(h.logs.some((l) => l.message.includes('Starting dialog'))).toBe(true);
+  });
+
+  it('лог валидации содержит длину ввода, а не сам текст', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('next');
+    await h.sendText('secret-name');
+
+    const rec = h.logs.find((l) => l.message.includes('input validation failed'));
+    expect(rec?.meta?.inputLength).toBe('secret-name'.length);
+    expect(rec?.meta).not.toHaveProperty('rawInput');
+    expect(JSON.stringify(rec?.meta)).not.toContain('secret-name');
+  });
 });

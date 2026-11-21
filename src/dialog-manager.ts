@@ -1,6 +1,5 @@
-import { Bot, Context, InlineKeyboard } from 'grammy';
+import { Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
-import { logger } from './logger.js';
 import { isMessageNotModified } from './utils/telegram-errors.js';
 import { escapeForMode, type ParseMode } from './utils/parse-mode.js';
 
@@ -27,6 +26,17 @@ export const coreTranslations: Record<'ru' | 'en', Record<CoreTranslationKey, st
   ru: coreRu,
   en: coreEn,
 };
+
+// ─── Логгер: ядро не знает про логгер приложения ────────────────────────────
+export interface DialogLogger {
+  debug(message: string, meta?: Record<string, unknown>): void;
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+}
+
+const noop = (): void => { };
+const noopLogger: DialogLogger = { debug: noop, info: noop, warn: noop, error: noop };
 
 // ─── Зарезервированный namespace core-callback'ов ───────────────────────────
 export const CALLBACK_NAMESPACE = '__dm';
@@ -215,6 +225,8 @@ export interface DialogManagerOptions<
   maxHistory?: number | undefined;
   /** Максимальная глубина стека диалогов. По умолчанию 8. */
   maxDialogDepth?: number | undefined;
+  /** Логгер ядра. По умолчанию — no-op (библиотека молчит, пока не попросишь). */
+  logger?: DialogLogger | undefined;
 }
 
 type AnyWindowConfig = WindowConfig<any, any, any, any>;
@@ -235,6 +247,7 @@ export class DialogManager<
   TId extends string = string,
   TKeys extends string = string
 > {
+  private log: DialogLogger;
   private dialogs = new Map<string, RegisteredDialog>();
   private errorHandler: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
@@ -246,13 +259,10 @@ export class DialogManager<
   private maxDialogDepth: number;
   private navDepth = new WeakMap<object, number>();
   private handlingError = new WeakSet<object>();
-  private bot: Bot<any>;
 
-  constructor(
-    bot: Bot<DialogContext<TState>>,
-    options?: DialogManagerOptions<TState, TId, TKeys>
-  ) {
-    this.bot = bot;
+
+  constructor(options?: DialogManagerOptions<TState, TId, TKeys>) {
+    this.log = options?.logger ?? noopLogger;
     this.errorHandler = options?.onError;
     this.defaultLang = options?.defaultLang ?? 'ru';
     this.rootDialogId = options?.rootDialogId;
@@ -341,7 +351,7 @@ export class DialogManager<
         this.translations[this.defaultLang]?.[key];
 
       if (text === undefined) {
-        logger.warn(`Translation key not found`, { lang, key });
+        this.log.warn(`Translation key not found`, { lang, key });
         return key;
       }
       if (!params) return text;
@@ -356,7 +366,7 @@ export class DialogManager<
 
   async setLanguage(ctx: DialogContext<TState>, lang: string): Promise<void> {
     ctx.session.lang = lang;
-    logger.info(`User changed language`, { userId: ctx.from?.id, lang });
+    this.log.info(`User changed language`, { userId: ctx.from?.id, lang });
     await this.show(ctx);
   }
 
@@ -386,7 +396,7 @@ export class DialogManager<
 
   private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
     const frame = this.getFrame(ctx);
-    logger.error(`DialogManager execution error`, {
+    this.log.error(`DialogManager execution error`, {
       userId: ctx.from?.id,
       dialog: frame?.dialog,
       window: frame?.window,
@@ -402,7 +412,7 @@ export class DialogManager<
           await this.errorHandler(error, ctx, this);
           return;
         } catch (handlerError) {
-          logger.error(`Error occurred inside custom onError handler`, { handlerError });
+          this.log.error(`Error occurred inside custom onError handler`, { handlerError });
         }
       }
       await ctx.reply(this.getTranslator(ctx)('error_fallback')).catch(() => { });
@@ -435,7 +445,7 @@ export class DialogManager<
         );
       }
 
-      logger.info(`Starting dialog`, {
+      this.log.info(`Starting dialog`, {
         userId: ctx.from?.id, dialogId, entry, depth: stack.length + 1,
       });
 
@@ -458,12 +468,12 @@ export class DialogManager<
     try {
       const stack = ctx.session.stack;
       if (!stack || stack.length === 0) {
-        logger.warn(`Attempted to finish dialog, but stack is empty`, { userId: ctx.from?.id });
+        this.log.warn(`Attempted to finish dialog, but stack is empty`, { userId: ctx.from?.id });
         return;
       }
 
       const finished = stack.pop();
-      logger.info(`Dialog finished`, {
+      this.log.info(`Dialog finished`, {
         userId: ctx.from?.id, dialog: finished?.dialog, remaining: stack.length,
       });
 
@@ -561,7 +571,7 @@ export class DialogManager<
 
       delete ctx.data.error;
 
-      logger.info(`User navigated to window`, {
+      this.log.info(`User navigated to window`, {
         userId: ctx.from?.id,
         dialog: frame.dialog,
         fromWindow: frame.window,
@@ -582,7 +592,7 @@ export class DialogManager<
     try {
       const frame = this.bind(ctx);
       if (!frame || frame.history.length === 0) {
-        logger.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
+        this.log.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
         return;
       }
 
@@ -600,13 +610,13 @@ export class DialogManager<
       const userId = ctx.from?.id;
       const frame = this.bind(ctx);
       if (!frame) {
-        logger.warn(`Attempted to show window, but no active dialog`, { userId });
+        this.log.warn(`Attempted to show window, but no active dialog`, { userId });
         return;
       }
 
       const window = this.resolveWindow(frame);
       if (!window) {
-        logger.error(`Window not found in registry during show`, {
+        this.log.error(`Window not found in registry during show`, {
           userId, dialog: frame.dialog, windowId: frame.window,
         });
         return;
@@ -617,7 +627,7 @@ export class DialogManager<
       if (window.guard) {
         const guardResult = await window.guard(ctx, this, t);
         if (guardResult === false) {
-          logger.warn(`Window guard blocked access (render halted)`, { userId, windowId: frame.window });
+          this.log.warn(`Window guard blocked access (render halted)`, { userId, windowId: frame.window });
           return;
         }
         if (typeof guardResult === 'string' && guardResult !== frame.window) {
@@ -660,10 +670,10 @@ export class DialogManager<
           return;
         } catch (error) {
           if (isMessageNotModified(error)) {
-            logger.debug(`Message is already up to date`, { userId, windowId: frame.window });
+            this.log.debug(`Message is already up to date`, { userId, windowId: frame.window });
             return;
           }
-          logger.debug(`Failed to edit message, sending a new one`, { userId, error });
+          this.log.debug(`Failed to edit message, sending a new one`, { userId, error });
           delete ctx.session.messageId;
         }
       }
@@ -709,7 +719,7 @@ export class DialogManager<
         if (window.guard) {
           const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
-            logger.warn(`Window guard blocked middleware action`, { userId, windowId: frame.window });
+            this.log.warn(`Window guard blocked middleware action`, { userId, windowId: frame.window });
             await this.answerCallback(ctx);
             return;
           }
@@ -722,7 +732,7 @@ export class DialogManager<
         // 1. Инлайн-кнопки
         if (ctx.callbackQuery && ctx.callbackQuery.data) {
           const actionKey = ctx.callbackQuery.data;
-          logger.debug(`User triggered action`, { userId, dialog: frame.dialog, windowId: frame.window, actionKey });
+          this.log.debug(`User triggered action`, { userId, dialog: frame.dialog, windowId: frame.window, actionKey });
 
           if (actionKey === coreCallbacks.back) {
             try { await this.goBack(ctx); }
@@ -750,7 +760,7 @@ export class DialogManager<
           const actionHandler = window.actions?.[actionKey];
 
           if (!actionHandler) {
-            logger.warn(`Action handler not found`, { userId, windowId: frame.window, actionKey });
+            this.log.warn(`Action handler not found`, { userId, windowId: frame.window, actionKey });
             await this.answerCallback(ctx, { text: t('action_not_available') });
             return next();
           }
@@ -758,7 +768,7 @@ export class DialogManager<
           try {
             await actionHandler(ctx, this, t);
           } catch (error) {
-            logger.error(`Error occurred while executing action handler`, {
+            this.log.error(`Error occurred while executing action handler`, {
               userId, windowId: frame.window, actionKey, error,
             });
             await this.handleError(error, ctx);
@@ -788,7 +798,7 @@ export class DialogManager<
               const userMessage =
                 error instanceof InputValidationError ? error.message : t('invalid_format');
 
-              logger.warn(`Window input formatter failed`, {
+              this.log.warn(`Window input formatter failed`, {
                 userId, windowId: frame.window, inputLength: rawInput.length, error,
               });
 
@@ -804,7 +814,7 @@ export class DialogManager<
             if (!parseResult.success) {
               const firstError = parseResult.error.issues[0]?.message || t('invalid_format');
 
-              logger.warn(`Window input validation failed`, {
+              this.log.warn(`Window input validation failed`, {
                 userId, windowId: frame.window, error: firstError, inputLength: rawInput.length,
               });
 
@@ -822,7 +832,7 @@ export class DialogManager<
             try {
               await window.onInput(ctx, this, t, value);
             } catch (error) {
-              logger.error(`Error occurred while executing onInput handler`, {
+              this.log.error(`Error occurred while executing onInput handler`, {
                 userId, windowId: frame.window, error,
               });
               await this.handleError(error, ctx);

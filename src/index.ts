@@ -123,7 +123,8 @@ bot.use(async (ctx, next) => {
 });
 
 // 5. Менеджер диалогов
-const manager = new DialogManager<Record<string, any>, string, AppTranslationKeys>(bot, {
+const manager = new DialogManager<Record<string, any>, string, AppTranslationKeys>({
+  logger,
   translations,
   defaultLang: 'ru',
   rootDialogId: D.core,

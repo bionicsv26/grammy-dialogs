@@ -10,6 +10,7 @@ import {
   type DialogConfig,
   type DialogContext,
   type DialogSession,
+  type DialogLogger,
 } from '../src/dialog-manager.js';
 
 export interface TestState {
@@ -91,7 +92,7 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
           if (text === 'bad') throw new InputValidationError('Своя ошибка');
           return text;
         },
-        inputSchema: z.string().min(2, 'too short'),
+        inputSchema: z.string().min(2, 'too short').max(10, 'too long'),
         onInput: (ctx, m, _t, value) => {
           ctx.data.name = value;
           return m.goTo(ctx, 'confirm');
@@ -170,6 +171,7 @@ const BOT_USER = {
 export async function createHarness(
   dialogs: readonly DialogConfig<any, any, any>[] = baseDialogs(),
   options: {
+    logger?: DialogLogger;
     rootDialogId?: string;
     translations?: typeof testTranslations;
     maxNavigationDepth?: number;
@@ -232,8 +234,16 @@ export async function createHarness(
     initial: (): DialogSession => ({ stack: [], lang: 'ru' }),
   }));
   bot.use(async (ctx, next) => { captured = ctx.session; await next(); });
+  const logs: { level: string; message: string; meta?: Record<string, unknown> }[] = [];
+  const push = (level: string) => (message: string, meta?: Record<string, unknown>) => {
+    logs.push({ level, message, ...(meta && { meta }) });
+  };
+  const spyLogger: DialogLogger = {
+    debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error'),
+  };
 
-  const manager = new DialogManager<TestState, TestId, TestKeys>(bot, {
+  const manager = new DialogManager<TestState, TestId, TestKeys>({
+    logger: options.logger ?? spyLogger,
     translations: options.translations ?? testTranslations,
     defaultLang: 'ru',
     rootDialogId: options.rootDialogId ?? 'main',
@@ -297,7 +307,7 @@ export async function createHarness(
   };
 
   return {
-    bot, manager, calls,
+    bot, manager, calls, logs,
     frame,
     stack: () => captured?.stack ?? [],
     // Адаптер под прежние ассерты: «текущее окно / история / данные»
