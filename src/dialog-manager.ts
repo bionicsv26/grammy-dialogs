@@ -51,24 +51,32 @@ function assertValidCallbackData(data: string, context: string): void {
   }
 }
 
-// ─── Сессия и контекст ──────────────────────────────────────────────────────
-export interface DialogSession<
-  TState extends Record<string, any> = Record<string, any>
-> {
-  // Осознанно string, а не TId: сессия приходит из Redis как JSON,
-  // литеральный тип здесь не гарантирован runtime. TId-безопасность
-  // живёт на границах методов (goTo/start/register).
-  currentWindow?: string;
-  history?: string[];
-  lang?: string;
-  data: TState & { error?: string };
-  messageId?: number;
+// ─── Сессия: стек фреймов ───────────────────────────────────────────────────
+/** Один запущенный диалог: своё окно, своя история, своё состояние. */
+export interface DialogFrame {
+  dialog: string;
+  window: string;
+  history: string[];
+  data: Record<string, any>;
+  startData?: unknown;
 }
 
+export interface DialogSession {
+  lang?: string;
+  messageId?: number;
+  stack: DialogFrame[]; // последний элемент — активный диалог
+}
+
+/**
+ * `data` — состояние АКТИВНОГО диалога (ссылка на frame.data).
+ * Менеджер выставляет её в начале апдейта; мутации handlers
+ * попадают прямо во фрейм и переживают сериализацию в Redis.
+ */
 export type DialogContext<
   TState extends Record<string, any> = Record<string, any>
 > = Context & {
-  session: DialogSession<TState>;
+  session: DialogSession;
+  data: TState & { error?: string };
 };
 
 // ─── Типы переводов и окон ──────────────────────────────────────────────────
@@ -106,9 +114,7 @@ export type WindowInputHandler<
 
 /**
  * Guard — чистый предикат доступа: читает состояние и решает
- * «пустить / заблокировать / редиректить». Без сайд-эффектов
- * (ответов на callback, отправки сообщений, мутаций сессии):
- * вызывается на двух гейтах — перед обработкой ввода/экшена и перед рендером.
+ * «пустить / заблокировать / редиректить». Без сайд-эффектов.
  */
 export type WindowGuard<
   TState extends Record<string, any>,
@@ -149,6 +155,36 @@ export interface WindowConfig<
   disableBackButton?: boolean;
 }
 
+// ─── Диалог: группа окон со своим состоянием ────────────────────────────────
+export interface DialogConfig<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> {
+  id: string;
+  entry: TId;
+  windows: readonly WindowConfig<TState, TId, TKeys, any>[];
+}
+
+export function defineDialog<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+>(config: DialogConfig<TState, TId, TKeys>): DialogConfig<TState, TId, TKeys> {
+  return config;
+}
+
+/** Пер-оконный вывод TValue из inputSchema внутри диалога. */
+export function defineWindow<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+>() {
+  return <TValue = string>(
+    window: WindowConfig<TState, TId, TKeys, TValue>
+  ): WindowConfig<TState, TId, TKeys, TValue> => window;
+}
+
 export interface DialogManagerOptions<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
@@ -165,21 +201,13 @@ export interface DialogManagerOptions<
   | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
   | undefined;
   defaultLang?: string | undefined;
-  /**
-   * Корень навигации: переход в это окно очищает историю,
-   * встроенный экшен coreCallbacks.root ведёт сюда.
-   * Если не задан — спецобработка отключена.
-   */
-  rootWindowId?: TId | undefined;
-  /** Режим разметки сообщений. По умолчанию HTML. */
+  /** Диалог, в который ведёт coreCallbacks.root. */
+  rootDialogId?: string | undefined;
   parseMode?: ParseMode | undefined;
-  /** Лимит вложенных переходов на один апдейт (защита от циклов guard-редиректов). */
   maxNavigationDepth?: number | undefined;
-  /** Максимальная глубина стека истории (старые записи вытесняются). По умолчанию 50. */
   maxHistory?: number | undefined;
 }
 
-/** Внутреннее стирание дженериков на границе хранения/коллекции. */
 type AnyWindowConfig = WindowConfig<any, any, any, any>;
 type AnyErrorHandler = (
   error: unknown,
@@ -187,30 +215,9 @@ type AnyErrorHandler = (
   manager: DialogManager<any, any, any>
 ) => Promise<void> | void;
 
-/** Коллекция окон модуля (TValue стёрт до any — окна гетерогенны). */
-export function defineWindows<
-  TState extends Record<string, any>,
-  TId extends string,
-  TKeys extends string = string
->(
-  windows: readonly WindowConfig<TState, TId, TKeys, any>[]
-): readonly WindowConfig<TState, TId, TKeys, any>[] {
-  return windows;
-}
-
-/**
- * Каррированный хелпер: фиксирует контекст модуля (TState/TId/TKeys),
- * а TValue выводит из inputSchema конкретного окна.
- * Оборачивай окна с вводом: win({ id, inputSchema, onInput, ... }).
- */
-export function defineWindow<
-  TState extends Record<string, any>,
-  TId extends string,
-  TKeys extends string = string
->() {
-  return <TValue = string>(
-    window: WindowConfig<TState, TId, TKeys, TValue>
-  ): WindowConfig<TState, TId, TKeys, TValue> => window;
+interface RegisteredDialog {
+  entry: string;
+  windows: Map<string, AnyWindowConfig>;
 }
 
 // ─── Менеджер диалогов ──────────────────────────────────────────────────────
@@ -219,13 +226,12 @@ export class DialogManager<
   TId extends string = string,
   TKeys extends string = string
 > {
-  // Приватные поля намеренно не зависят от TState/TId/TKeys,
-  // чтобы разные инстанциации класса были структурно совместимы.
-  private windows = new Map<string, AnyWindowConfig>();
+  // Приватные поля не зависят от дженериков — инстанциации класса совместимы.
+  private dialogs = new Map<string, RegisteredDialog>();
   private errorHandler: AnyErrorHandler | undefined;
   private translations: Record<string, Record<string, string>>;
   private defaultLang: string;
-  private rootWindowId: string | undefined;
+  private rootDialogId: string | undefined;
   private parseMode: ParseMode;
   private maxNavigationDepth: number;
   private maxHistory: number;
@@ -240,12 +246,11 @@ export class DialogManager<
     this.bot = bot;
     this.errorHandler = options?.onError;
     this.defaultLang = options?.defaultLang ?? 'ru';
-    this.rootWindowId = options?.rootWindowId;
+    this.rootDialogId = options?.rootDialogId;
     this.parseMode = options?.parseMode ?? 'HTML';
     this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
     this.maxHistory = Math.max(0, options?.maxHistory ?? 50);
 
-    // Core-дефолты как база; пользовательские переводы перекрывают их.
     const merged: Record<string, Record<string, string>> = {};
     for (const [lang, dict] of Object.entries(coreTranslations)) {
       merged[lang] = { ...dict };
@@ -262,28 +267,53 @@ export class DialogManager<
     this.translations = merged;
   }
 
-  register<TValue = string>(window: WindowConfig<TState, TId, TKeys, TValue>): this {
-    if (this.windows.has(window.id)) {
-      throw new Error(
-        `Window with id "${window.id}" is already registered. ` +
-        `Each window must be owned by exactly one module.`
-      );
+  registerDialog<TS extends Record<string, any>, TI extends string>(
+    dialog: DialogConfig<TS, TI, TKeys>
+  ): this {
+    if (this.dialogs.has(dialog.id)) {
+      throw new Error(`Dialog "${dialog.id}" is already registered.`);
     }
-    for (const actionKey of Object.keys(window.actions ?? {})) {
-      if (actionKey.startsWith(CALLBACK_PREFIX)) {
-        throw new Error(
-          `Action key "${actionKey}" in window "${window.id}" uses the reserved namespace "${CALLBACK_PREFIX}".`
-        );
+
+    const windows = new Map<string, AnyWindowConfig>();
+    for (const w of dialog.windows) {
+      if (windows.has(w.id)) {
+        throw new Error(`Window "${w.id}" is already registered in dialog "${dialog.id}".`);
       }
-      assertValidCallbackData(actionKey, `action "${actionKey}" in window "${window.id}"`);
+      for (const actionKey of Object.keys(w.actions ?? {})) {
+        if (actionKey.startsWith(CALLBACK_PREFIX)) {
+          throw new Error(
+            `Action key "${actionKey}" in window "${w.id}" uses the reserved namespace "${CALLBACK_PREFIX}".`
+          );
+        }
+        assertValidCallbackData(actionKey, `action "${actionKey}" in window "${w.id}"`);
+      }
+      windows.set(w.id, w as AnyWindowConfig);
     }
-    this.windows.set(window.id, window as AnyWindowConfig);
+
+    if (!windows.has(dialog.entry)) {
+      throw new Error(`Entry window "${dialog.entry}" is not defined in dialog "${dialog.id}".`);
+    }
+
+    this.dialogs.set(dialog.id, { entry: dialog.entry, windows });
     return this;
   }
 
-  registerAll(windows: readonly WindowConfig<TState, TId, TKeys, any>[]): this {
-    for (const w of windows) this.register(w);
-    return this;
+  /** Активный фрейм (для прикладного кода и тестов). */
+  public getFrame(ctx: DialogContext<any>): DialogFrame | undefined {
+    const stack = ctx.session?.stack;
+    if (!stack || stack.length === 0) return undefined;
+    return stack[stack.length - 1];
+  }
+
+  /** Привязывает ctx.data к состоянию активного фрейма. */
+  private bind(ctx: DialogContext<any>): DialogFrame | undefined {
+    const frame = this.getFrame(ctx);
+    if (frame) ctx.data = frame.data;
+    return frame;
+  }
+
+  private resolveWindow(frame: DialogFrame): AnyWindowConfig | undefined {
+    return this.dialogs.get(frame.dialog)?.windows.get(frame.window);
   }
 
   public getTranslator(ctx: DialogContext<TState>): TranslationFunction<TKeys> {
@@ -298,12 +328,8 @@ export class DialogManager<
         logger.warn(`Translation key not found`, { lang, key });
         return key;
       }
-
       if (!params) return text;
 
-      // Один проход: значение вставляется литерально (без $-паттернов),
-      // не пересканируется, RegExp из ключей не строится; параметры
-      // экранируются под текущий parse_mode.
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
           ? escapeForMode(String(params[name]), this.parseMode)
@@ -318,7 +344,6 @@ export class DialogManager<
     await this.show(ctx);
   }
 
-  // Не мутирует переданную клавиатуру: клонируем и добавляем «Назад».
   static appendBackButton(
     keyboard: InlineKeyboard,
     text: string = coreTranslations.en.btn_back
@@ -328,8 +353,6 @@ export class DialogManager<
     const lastRow = rows[rows.length - 1];
 
     if (lastRow && lastRow.length === 0) {
-      // Пустая клавиатура (new InlineKeyboard() = [[]]) — заполняем
-      // существующий ряд, чтобы не отправлять пустой ряд в разметке.
       result.text(text, coreCallbacks.back);
     } else {
       result.row().text(text, coreCallbacks.back);
@@ -337,7 +360,6 @@ export class DialogManager<
     return result;
   }
 
-  /** Единая точка ответа на callback: inline пропускаем, ошибки глотаем. */
   private async answerCallback(
     ctx: DialogContext<TState>,
     other?: Parameters<DialogContext<TState>['answerCallbackQuery']>[0]
@@ -347,9 +369,11 @@ export class DialogManager<
   }
 
   private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
+    const frame = this.getFrame(ctx);
     logger.error(`DialogManager execution error`, {
       userId: ctx.from?.id,
-      currentWindow: ctx.session.currentWindow,
+      dialog: frame?.dialog,
+      window: frame?.window,
       error,
     });
 
@@ -365,29 +389,50 @@ export class DialogManager<
           logger.error(`Error occurred inside custom onError handler`, { handlerError });
         }
       }
-
-      await ctx
-        .reply(this.getTranslator(ctx)('error_fallback'))
-        .catch(() => { });
+      await ctx.reply(this.getTranslator(ctx)('error_fallback')).catch(() => { });
     } finally {
       this.handlingError.delete(ctx);
     }
   }
 
-  async start(
+  /** Запускает диалог, заменяя активный фрейм. Сообщение редактируется на месте. */
+  async startDialog(
     ctx: DialogContext<TState>,
-    windowId: TId,
-    initialData: Partial<TState> = {}
+    dialogId: string,
+    options: { startData?: unknown; entry?: string } = {}
   ): Promise<void> {
     try {
-      if (!this.windows.has(windowId)) {
-        throw new Error(`Window with id "${windowId}" is not registered.`);
+      const dialog = this.dialogs.get(dialogId);
+      if (!dialog) throw new Error(`Dialog "${dialogId}" is not registered.`);
+
+      const entry = options.entry ?? dialog.entry;
+      if (!dialog.windows.has(entry)) {
+        throw new Error(`Entry window "${entry}" is not defined in dialog "${dialogId}".`);
       }
 
-      logger.info(`Starting dialog at window`, { userId: ctx.from?.id, windowId });
+      logger.info(`Starting dialog`, { userId: ctx.from?.id, dialogId, entry });
 
-      // Снимаем клавиатуру прошлого сообщения: иначе его кнопки останутся
-      // активными и будут «стрелять» в контексте нового диалога.
+      ctx.session.stack = [{
+        dialog: dialogId,
+        window: entry,
+        history: [],
+        data: {},
+        ...(options.startData !== undefined && { startData: options.startData }),
+      }];
+      this.bind(ctx);
+      await this.show(ctx);
+    } catch (error) {
+      await this.handleError(error, ctx);
+    }
+  }
+
+  /** Полный сброс: снимает старую клавиатуру и шлёт новое сообщение. */
+  async restart(
+    ctx: DialogContext<TState>,
+    dialogId: string,
+    options: { startData?: unknown; entry?: string } = {}
+  ): Promise<void> {
+    try {
       if (ctx.session.messageId && ctx.chat) {
         await ctx.api
           .editMessageReplyMarkup(ctx.chat.id, ctx.session.messageId, {
@@ -395,23 +440,19 @@ export class DialogManager<
           })
           .catch(() => { });
       }
-
-      ctx.session.currentWindow = windowId;
-      ctx.session.data = { ...initialData } as DialogSession<TState>['data'];
       delete ctx.session.messageId;
-      ctx.session.history = [];
-      await this.show(ctx);
+      await this.startDialog(ctx, dialogId, options);
     } catch (error) {
       await this.handleError(error, ctx);
     }
   }
 
+  /** Переход внутри активного диалога. */
   async goTo(
     ctx: DialogContext<TState>,
     windowId: TId,
     options: { pushHistory?: boolean } = {}
   ): Promise<void> {
-    // Глубина считается на апдейт (ctx живёт ровно один апдейт).
     const depth = this.navDepth.get(ctx) ?? 0;
     this.navDepth.set(ctx, depth + 1);
     try {
@@ -422,47 +463,37 @@ export class DialogManager<
         );
       }
 
-      if (!this.windows.has(windowId)) {
-        logger.error(`Attempted to navigate to unregistered window`, {
-          userId: ctx.from?.id,
-          targetWindow: windowId,
-        });
-        throw new Error(`Window with id "${windowId}" is not registered.`);
+      const frame = this.bind(ctx);
+      if (!frame) throw new Error(`No active dialog to navigate in.`);
+
+      const dialog = this.dialogs.get(frame.dialog);
+      if (!dialog?.windows.has(windowId)) {
+        throw new Error(`Window "${windowId}" is not registered in dialog "${frame.dialog}".`);
       }
 
-      const currentWindow = ctx.session.currentWindow;
-
-      // Переход в то же окно = перерисовка (например, экшен «обновить»).
-      if (currentWindow === windowId) {
+      if (frame.window === windowId) {
         await this.show(ctx);
         return;
       }
 
-      if (!ctx.session.history) {
-        ctx.session.history = [];
-      }
-
-      // Переход в корень навигации начинает её заново.
-      if (windowId === this.rootWindowId) {
-        ctx.session.history = [];
-      } else if (options.pushHistory !== false && currentWindow) {
-        ctx.session.history.push(currentWindow);
-        if (ctx.session.history.length > this.maxHistory) {
-          ctx.session.history.splice(0, ctx.session.history.length - this.maxHistory);
+      if (options.pushHistory !== false) {
+        frame.history.push(frame.window);
+        if (frame.history.length > this.maxHistory) {
+          frame.history.splice(0, frame.history.length - this.maxHistory);
         }
       }
 
-      // Уходим с окна — его ошибка ввода больше не актуальна.
-      delete ctx.session.data.error;
+      delete ctx.data.error;
 
       logger.info(`User navigated to window`, {
         userId: ctx.from?.id,
-        fromWindow: currentWindow,
+        dialog: frame.dialog,
+        fromWindow: frame.window,
         toWindow: windowId,
-        historyDepth: ctx.session.history.length,
+        historyDepth: frame.history.length,
       });
 
-      ctx.session.currentWindow = windowId;
+      frame.window = windowId;
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
@@ -473,21 +504,15 @@ export class DialogManager<
 
   async goBack(ctx: DialogContext<TState>): Promise<void> {
     try {
-      if (!ctx.session.history || ctx.session.history.length === 0) {
+      const frame = this.bind(ctx);
+      if (!frame || frame.history.length === 0) {
         logger.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
         return;
       }
 
-      const previousWindow = ctx.session.history.pop() as TId;
-
-      logger.info(`User went back`, {
-        userId: ctx.from?.id,
-        toWindow: previousWindow,
-        remainingHistory: ctx.session.history.length,
-      });
-
-      delete ctx.session.data.error;
-      ctx.session.currentWindow = previousWindow;
+      const previousWindow = frame.history.pop() as TId;
+      delete ctx.data.error;
+      frame.window = previousWindow;
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
@@ -497,17 +522,17 @@ export class DialogManager<
   async show(ctx: DialogContext<TState>): Promise<void> {
     try {
       const userId = ctx.from?.id;
-      const windowId = ctx.session.currentWindow;
-      if (!windowId) {
-        logger.warn(`Attempted to show window, but currentWindow is not set`, { userId });
+      const frame = this.bind(ctx);
+      if (!frame) {
+        logger.warn(`Attempted to show window, but no active dialog`, { userId });
         return;
       }
 
-      const window = this.windows.get(windowId) as
-        | WindowConfig<TState, TId, TKeys, any>
-        | undefined;
+      const window = this.resolveWindow(frame);
       if (!window) {
-        logger.error(`Window not found in registry during show`, { userId, windowId });
+        logger.error(`Window not found in registry during show`, {
+          userId, dialog: frame.dialog, windowId: frame.window,
+        });
         return;
       }
 
@@ -516,16 +541,11 @@ export class DialogManager<
       if (window.guard) {
         const guardResult = await window.guard(ctx, this, t);
         if (guardResult === false) {
-          logger.warn(`Window guard blocked access (render halted)`, { userId, windowId });
+          logger.warn(`Window guard blocked access (render halted)`, { userId, windowId: frame.window });
           return;
         }
-        if (typeof guardResult === 'string' && guardResult !== windowId) {
-          logger.info(`Window guard redirected user`, {
-            userId,
-            fromWindow: windowId,
-            toWindow: guardResult,
-          });
-          await this.goTo(ctx, guardResult, { pushHistory: false });
+        if (typeof guardResult === 'string' && guardResult !== frame.window) {
+          await this.goTo(ctx, guardResult as TId, { pushHistory: false });
           return;
         }
       }
@@ -534,9 +554,7 @@ export class DialogManager<
       const text = rendered.text;
       let keyboard = rendered.keyboard;
 
-      const shouldShowBack =
-        !!ctx.session.history?.length &&
-        !window.disableBackButton;
+      const shouldShowBack = frame.history.length > 0 && !window.disableBackButton;
 
       if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
@@ -545,12 +563,11 @@ export class DialogManager<
         );
       }
 
-      // Лимит Telegram на callback_data кнопок (1–64 байта UTF-8).
       if (keyboard) {
         for (const row of keyboard.inline_keyboard) {
           for (const button of row) {
             if ('callback_data' in button && typeof button.callback_data === 'string') {
-              assertValidCallbackData(button.callback_data, `button in window "${windowId}"`);
+              assertValidCallbackData(button.callback_data, `button in window "${frame.window}"`);
             }
           }
         }
@@ -559,23 +576,15 @@ export class DialogManager<
       const otherOptions: { parse_mode: ParseMode; reply_markup?: InlineKeyboard } = {
         parse_mode: this.parseMode,
       };
-      if (keyboard) {
-        otherOptions.reply_markup = keyboard;
-      }
+      if (keyboard) otherOptions.reply_markup = keyboard;
 
       if (ctx.session.messageId && ctx.chat) {
         try {
-          await ctx.api.editMessageText(
-            ctx.chat.id,
-            ctx.session.messageId,
-            text,
-            otherOptions
-          );
+          await ctx.api.editMessageText(ctx.chat.id, ctx.session.messageId, text, otherOptions);
           return;
         } catch (error) {
-          // Контент уже актуален — ничего не делаем и НЕ трогаем messageId.
           if (isMessageNotModified(error)) {
-            logger.debug(`Message is already up to date`, { userId, windowId });
+            logger.debug(`Message is already up to date`, { userId, windowId: frame.window });
             return;
           }
           logger.debug(`Failed to edit message, sending a new one`, { userId, error });
@@ -600,53 +609,36 @@ export class DialogManager<
       try {
         const userId = ctx.from?.id;
 
-        // Апдейты без чата (например, inline-callback) не имеют сессии.
-        if (!ctx.session) {
-          return next();
-        }
+        if (!ctx.session) return next();
 
-        // Telegram принимает ответ на callback query только один раз.
-        // Оборачиваем метод, чтобы повторные ответы (хендлер + finally)
-        // не превращались в лишние вызовы API.
         if (ctx.callbackQuery) {
           const original = ctx.answerCallbackQuery.bind(ctx);
           let answered = false;
           ctx.answerCallbackQuery = async (other?: Parameters<typeof original>[0]) => {
             if (answered) return true;
             const result = await original(other);
-            answered = true; // помечаем только после успеха
+            answered = true;
             return result;
           };
         }
 
-        const windowId = ctx.session.currentWindow;
-        if (!windowId) {
-          return next();
-        }
+        const frame = this.bind(ctx);
+        if (!frame) return next();
 
-        const window = this.windows.get(windowId) as
-          | WindowConfig<TState, TId, TKeys, any>
-          | undefined;
-        if (!window) {
-          return next();
-        }
+        const window = this.resolveWindow(frame);
+        if (!window) return next();
 
         const t = this.getTranslator(ctx);
 
         if (window.guard) {
           const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
-            logger.warn(`Window guard blocked middleware action`, { userId, windowId });
+            logger.warn(`Window guard blocked middleware action`, { userId, windowId: frame.window });
             await this.answerCallback(ctx);
             return;
           }
-          if (typeof guardResult === 'string' && guardResult !== windowId) {
-            logger.info(`Window guard redirected user in middleware`, {
-              userId,
-              fromWindow: windowId,
-              toWindow: guardResult,
-            });
-            await this.goTo(ctx, guardResult, { pushHistory: false });
+          if (typeof guardResult === 'string' && guardResult !== frame.window) {
+            await this.goTo(ctx, guardResult as TId, { pushHistory: false });
             return;
           }
         }
@@ -654,32 +646,24 @@ export class DialogManager<
         // 1. Инлайн-кнопки
         if (ctx.callbackQuery && ctx.callbackQuery.data) {
           const actionKey = ctx.callbackQuery.data;
-
-          logger.debug(`User triggered action`, { userId, windowId, actionKey });
+          logger.debug(`User triggered action`, { userId, dialog: frame.dialog, windowId: frame.window, actionKey });
 
           if (actionKey === coreCallbacks.back) {
-            try {
-              await this.goBack(ctx);
-            } finally {
-              await this.answerCallback(ctx);
-            }
+            try { await this.goBack(ctx); }
+            finally { await this.answerCallback(ctx); }
             return;
           }
 
-          if (actionKey === coreCallbacks.root && this.rootWindowId !== undefined) {
-            try {
-              await this.goTo(ctx, this.rootWindowId as TId);
-            } finally {
-              await this.answerCallback(ctx);
-            }
+          if (actionKey === coreCallbacks.root && this.rootDialogId !== undefined) {
+            try { await this.startDialog(ctx, this.rootDialogId); }
+            finally { await this.answerCallback(ctx); }
             return;
           }
 
           if (actionKey.startsWith(LANG_PREFIX)) {
             const newLang = actionKey.slice(LANG_PREFIX.length);
-            try {
-              await this.setLanguage(ctx, newLang);
-            } finally {
+            try { await this.setLanguage(ctx, newLang); }
+            finally {
               await this.answerCallback(ctx, {
                 text: this.getTranslator(ctx)('language_changed'),
               });
@@ -690,7 +674,7 @@ export class DialogManager<
           const actionHandler = window.actions?.[actionKey];
 
           if (!actionHandler) {
-            logger.warn(`Action handler not found`, { userId, windowId, actionKey });
+            logger.warn(`Action handler not found`, { userId, windowId: frame.window, actionKey });
             await this.answerCallback(ctx, { text: t('action_not_available') });
             return next();
           }
@@ -699,10 +683,7 @@ export class DialogManager<
             await actionHandler(ctx, this, t);
           } catch (error) {
             logger.error(`Error occurred while executing action handler`, {
-              userId,
-              windowId,
-              actionKey,
-              error,
+              userId, windowId: frame.window, actionKey, error,
             });
             await this.handleError(error, ctx);
           } finally {
@@ -717,9 +698,7 @@ export class DialogManager<
           ctx.message.text &&
           (window.inputSchema || window.onInput || window.formatter)
         ) {
-          if (ctx.message.text.startsWith('/')) {
-            return next();
-          }
+          if (ctx.message.text.startsWith('/')) return next();
 
           await ctx.deleteMessage().catch(() => { });
 
@@ -731,18 +710,13 @@ export class DialogManager<
               value = window.formatter(rawInput);
             } catch (error) {
               const userMessage =
-                error instanceof InputValidationError
-                  ? error.message
-                  : t('invalid_format');
+                error instanceof InputValidationError ? error.message : t('invalid_format');
 
               logger.warn(`Window input formatter failed`, {
-                userId,
-                windowId,
-                inputLength: rawInput.length,
-                error,
+                userId, windowId: frame.window, inputLength: rawInput.length, error,
               });
 
-              ctx.session.data.error = userMessage;
+              ctx.data.error = userMessage;
               await this.show(ctx);
               return;
             }
@@ -752,17 +726,13 @@ export class DialogManager<
             const parseResult = window.inputSchema.safeParse(value);
 
             if (!parseResult.success) {
-              const firstError =
-                parseResult.error.issues[0]?.message || t('invalid_format');
+              const firstError = parseResult.error.issues[0]?.message || t('invalid_format');
 
               logger.warn(`Window input validation failed`, {
-                userId,
-                windowId,
-                error: firstError,
-                inputLength: rawInput.length,
+                userId, windowId: frame.window, error: firstError, inputLength: rawInput.length,
               });
 
-              ctx.session.data.error = firstError;
+              ctx.data.error = firstError;
               await this.show(ctx);
               return;
             }
@@ -770,17 +740,14 @@ export class DialogManager<
             value = parseResult.data;
           }
 
-          // Ввод принят — очищаем прошлую ошибку (в обоих путях).
-          delete ctx.session.data.error;
+          delete ctx.data.error;
 
           if (window.onInput) {
             try {
               await window.onInput(ctx, this, t, value);
             } catch (error) {
               logger.error(`Error occurred while executing onInput handler`, {
-                userId,
-                windowId,
-                error,
+                userId, windowId: frame.window, error,
               });
               await this.handleError(error, ctx);
             }

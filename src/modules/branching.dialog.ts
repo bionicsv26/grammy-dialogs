@@ -1,28 +1,23 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  defineWindows,
+  defineDialog,
   coreCallbacks,
   type TranslationFunction,
   type WindowActionHandler,
 } from '../dialog-manager.js';
 import type { AppTranslationKeys } from '../translations.js';
-import type { CoreWindowId } from './core.dialog.js';
 
 export interface BranchingState {
   chosenBranch?: 'tech' | 'design' | 'business';
 }
 
 export const branchingWindowIds = [
-  'select_branch',
-  'window_tech_step',
-  'window_design_step',
-  'window_business_step',
+  'select_branch', 'window_tech_step', 'window_design_step', 'window_business_step',
 ] as const;
-
 export type BranchingWindowId = typeof branchingWindowIds[number];
 
-export function createBranchingWindows<TState extends BranchingState>() {
-  type Id = BranchingWindowId | CoreWindowId;
+export function createBranchingDialog() {
+  type Id = BranchingWindowId;
 
   const branchKeyboard = (t: TranslationFunction<AppTranslationKeys>) =>
     new InlineKeyboard()
@@ -30,70 +25,55 @@ export function createBranchingWindows<TState extends BranchingState>() {
       .row()
       .text(t('btn_finish'), 'finish_flow');
 
-  const branchActions: Record<string, WindowActionHandler<TState, Id, AppTranslationKeys>> = {
-    finish_flow: async (ctx, manager) => {
-      await manager.goTo(ctx, 'completed');
-    },
+  const branchActions: Record<string, WindowActionHandler<BranchingState, Id, AppTranslationKeys>> = {
+    finish_flow: (ctx, m) => m.startDialog(ctx, 'core', { entry: 'completed' }),
   };
 
-  return defineWindows<TState, Id, AppTranslationKeys>([
-    // Развилка
-    {
-      id: 'select_branch',
-      render: async (_ctx, t) => {
-        const keyboard = new InlineKeyboard()
-          .text(t('branch_tech_btn'), 'branch_tech')
-          .row()
-          .text(t('branch_design_btn'), 'branch_design')
-          .row()
-          .text(t('branch_business_btn'), 'branch_business');
-
-        return { text: t('select_branch_text'), keyboard };
+  return defineDialog<BranchingState, Id, AppTranslationKeys>({
+    id: 'branching',
+    entry: 'select_branch',
+    windows: [
+      {
+        id: 'select_branch',
+        render: (_ctx, t) => ({
+          text: t('select_branch_text'),
+          keyboard: new InlineKeyboard()
+            .text(t('branch_tech_btn'), 'branch_tech')
+            .row()
+            .text(t('branch_design_btn'), 'branch_design')
+            .row()
+            .text(t('branch_business_btn'), 'branch_business'),
+        }),
+        actions: {
+          branch_tech: async (ctx, m) => {
+            ctx.data.chosenBranch = 'tech';
+            await m.goTo(ctx, 'window_tech_step');
+          },
+          branch_design: async (ctx, m) => {
+            ctx.data.chosenBranch = 'design';
+            await m.goTo(ctx, 'window_design_step');
+          },
+          branch_business: async (ctx, m) => {
+            ctx.data.chosenBranch = 'business';
+            await m.goTo(ctx, 'window_business_step');
+          },
+        },
       },
-      actions: {
-        branch_tech: async (ctx, manager) => {
-          ctx.session.data.chosenBranch = 'tech';
-          await manager.goTo(ctx, 'window_tech_step');
-        },
-        branch_design: async (ctx, manager) => {
-          ctx.session.data.chosenBranch = 'design';
-          await manager.goTo(ctx, 'window_design_step');
-        },
-        branch_business: async (ctx, manager) => {
-          ctx.session.data.chosenBranch = 'business';
-          await manager.goTo(ctx, 'window_business_step');
-        },
+      {
+        id: 'window_tech_step',
+        render: (_ctx, t) => ({ text: t('tech_step_text'), keyboard: branchKeyboard(t) }),
+        actions: branchActions,
       },
-    },
-
-    // Техническая ветка
-    {
-      id: 'window_tech_step',
-      render: async (_ctx, t) => ({
-        text: t('tech_step_text'),
-        keyboard: branchKeyboard(t),
-      }),
-      actions: branchActions,
-    },
-
-    // Дизайн-ветка
-    {
-      id: 'window_design_step',
-      render: async (_ctx, t) => ({
-        text: t('design_step_text'),
-        keyboard: branchKeyboard(t),
-      }),
-      actions: branchActions,
-    },
-
-    // Бизнес-ветка
-    {
-      id: 'window_business_step',
-      render: async (_ctx, t) => ({
-        text: t('business_step_text'),
-        keyboard: branchKeyboard(t),
-      }),
-      actions: branchActions,
-    },
-  ]);
+      {
+        id: 'window_design_step',
+        render: (_ctx, t) => ({ text: t('design_step_text'), keyboard: branchKeyboard(t) }),
+        actions: branchActions,
+      },
+      {
+        id: 'window_business_step',
+        render: (_ctx, t) => ({ text: t('business_step_text'), keyboard: branchKeyboard(t) }),
+        actions: branchActions,
+      },
+    ],
+  });
 }

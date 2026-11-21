@@ -238,12 +238,72 @@ describe('DialogManager', () => {
   });
 
   // ─── Регистрация окон ─────────────────────────────────────────────────────
-  it('register: дубликат id, reserved namespace и >64 байт отклоняются', async () => {
+  it('registerDialog: дубликаты, reserved namespace, >64 байт и битый entry отклоняются', async () => {
     const h = await createHarness();
     const w = (id: any, actions?: any) => ({ id, render: () => ({ text: 'x' }), actions });
+    const d = (id: string, entry: any, windows: any[]) => ({ id, entry, windows });
 
-    expect(() => h.manager.register(w('root'))).toThrow(/already registered/);
-    expect(() => h.manager.register(w('dup1', { '__dm:x': () => { } }))).toThrow(/reserved namespace/);
-    expect(() => h.manager.register(w('dup2', { ['x'.repeat(65)]: () => { } }))).toThrow(/64 bytes/);
+    expect(() => h.manager.registerDialog(d('main', 'root', [w('root')]) as any))
+      .toThrow(/Dialog "main" is already registered/);
+
+    expect(() => h.manager.registerDialog(d('dup', 'a', [w('a'), w('a')]) as any))
+      .toThrow(/Window "a" is already registered/);
+
+    expect(() => h.manager.registerDialog(d('ns', 'a', [w('a', { '__dm:x': () => { } })]) as any))
+      .toThrow(/reserved namespace/);
+
+    expect(() => h.manager.registerDialog(d('len', 'a', [w('a', { ['x'.repeat(65)]: () => { } })]) as any))
+      .toThrow(/64 bytes/);
+
+    expect(() => h.manager.registerDialog(d('entry', 'missing', [w('a')]) as any))
+      .toThrow(/Entry window "missing"/);
+  });
+
+  // ─── Диалоги ──────────────────────────────────────────────────────────────
+  it('startDialog: заменяет фрейм, обнуляет историю и состояние', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('next');
+    await h.sendText('Anna');
+    expect(h.frame()?.data.name).toBe('Anna');
+
+    await h.click(coreCallbacks.back); // confirm → form
+    await h.click(coreCallbacks.back); // form → root
+    await h.click('to_other');
+
+    expect(h.frame()?.dialog).toBe('other');
+    expect(h.frame()?.window).toBe('hello');
+    expect(h.frame()?.history).toEqual([]);
+    expect(h.frame()?.data.name).toBeUndefined();
+  });
+
+  it('состояние изолировано между диалогами', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_other');
+    await h.click('set_name');
+
+    expect(h.frame()?.data.name).toBe('OTHER');
+
+    await h.click('back_to_main');
+    expect(h.frame()?.dialog).toBe('main');
+    expect(h.frame()?.data.name).toBeUndefined();
+  });
+
+  it('неизвестный диалог уходит в onError', async () => {
+    const errors: unknown[] = [];
+    const h = await createHarness(undefined, { onError: (e) => { errors.push(e); } });
+    await h.sendText('/start');
+
+    // root-кнопка ведёт в диалог, которого нет
+    const bad = await createHarness(undefined, {
+      rootDialogId: 'missing',
+      onError: (e) => { errors.push(e); },
+    });
+    await bad.sendText('/start');
+    await bad.click(coreCallbacks.root);
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(String(errors[0])).toMatch(/is not registered/);
   });
 });

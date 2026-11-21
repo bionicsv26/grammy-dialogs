@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import {
-  defineWindow, defineWindows,
-  type DialogContext, type DialogManager, type TranslationFunction,
+  defineDialog,
+  defineWindow,
+  type DialogContext,
+  type DialogManager,
+  type TranslationFunction,
 } from '../src/dialog-manager.js';
 import type { TestId, TestKeys, TestState } from './harness.js';
 
@@ -12,16 +15,28 @@ declare const ctx: DialogContext<TestState>;
 // @ts-expect-error
 manager.goTo(ctx, 'formm');
 
-// 2. Опечатка в id окна не компилируется
-defineWindows<TestState, TestId, TestKeys>([
-  {
-    // @ts-expect-error
-    id: 'rooot',
-    render: () => ({ text: 'x' }),
-  },
-]);
+// 2. Опечатка в id окна внутри диалога не компилируется
+defineDialog<TestState, TestId, TestKeys>({
+  id: 'typo',
+  entry: 'root',
+  windows: [
+    {
+      // @ts-expect-error
+      id: 'rooot',
+      render: () => ({ text: 'x' }),
+    },
+  ],
+});
 
-// 3. Тип value выводится из inputSchema
+// 3. entry обязан быть окном этого же диалога
+defineDialog<TestState, TestId, TestKeys>({
+  id: 'bad-entry',
+  // @ts-expect-error
+  entry: 'nope',
+  windows: [{ id: 'root', render: () => ({ text: 'x' }) }],
+});
+
+// 4. Тип value выводится из inputSchema
 const win = defineWindow<TestState, TestId, TestKeys>();
 win({
   id: 'form',
@@ -35,7 +50,14 @@ win({
   },
 });
 
-// 4. t() принимает ключи приложения и core, но не произвольные строки
+// 5. ctx.data — состояние диалога, типизировано
+declare const dctx: DialogContext<TestState>;
+const name: string | undefined = dctx.data.name;
+// @ts-expect-error
+const wrong: number = dctx.data.name;
+void name; void wrong;
+
+// 6. t() принимает ключи приложения и core, но не произвольные строки
 declare const t: TranslationFunction<TestKeys>;
 t('root_text');
 t('btn_back');

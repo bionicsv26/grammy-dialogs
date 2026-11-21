@@ -3,13 +3,13 @@ import type { Chat, Message, Update, User, UserFromGetMe } from 'grammy/types';
 import { z } from 'zod';
 import {
   DialogManager,
+  defineDialog,
   defineWindow,
-  defineWindows,
   InputValidationError,
   type CoreTranslationKey,
+  type DialogConfig,
   type DialogContext,
   type DialogSession,
-  type WindowConfig,
 } from '../src/dialog-manager.js';
 
 export interface TestState {
@@ -23,7 +23,7 @@ export type TestId = (typeof testIds)[number];
 
 export type TestKeys =
   | 'root_text' | 'form_text' | 'confirm_text' | 'guarded_text' | 'target_text'
-  | 'cycle_a_text' | 'cycle_b_text' | 'blocked_text'
+  | 'cycle_a_text' | 'cycle_b_text' | 'blocked_text' | 'hello_text'
   | 'btn_next' | 'btn_guard' | 'btn_noop' | 'btn_cycle' | 'btn_blocked';
 
 export type TestCtx = DialogContext<TestState>;
@@ -33,6 +33,7 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
     root_text: 'Корень', form_text: 'Форма', confirm_text: 'Готово: {name}',
     guarded_text: 'Защищено', target_text: 'Цель',
     cycle_a_text: 'Цикл A', cycle_b_text: 'Цикл B', blocked_text: 'Закрыто',
+    hello_text: 'Другой диалог',
     btn_next: 'Дальше', btn_guard: 'В защищённое', btn_noop: 'Обновить',
     btn_cycle: 'В цикл', btn_blocked: 'В закрытое',
     // btn_back НАМЕРЕННО отсутствует — проверяем core-дефолт
@@ -41,120 +42,130 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
     root_text: 'Root', form_text: 'Form', confirm_text: 'Done: {name}',
     guarded_text: 'Guarded', target_text: 'Target',
     cycle_a_text: 'Cycle A', cycle_b_text: 'Cycle B', blocked_text: 'Blocked',
+    hello_text: 'Other dialog',
     btn_next: 'Next', btn_guard: 'To guarded', btn_noop: 'Refresh',
     btn_cycle: 'To cycle', btn_blocked: 'To blocked',
   },
 };
 
-export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys, any>[] {
+export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
   const win = defineWindow<TestState, TestId, TestKeys>();
 
-  return defineWindows<TestState, TestId, TestKeys>([
-    {
-      id: 'root',
-      render: (_ctx, t) => ({
-        text: t('root_text'),
-        keyboard: new InlineKeyboard()
-          .text(t('btn_next'), 'next')
-          .row()
-          .text(t('btn_guard'), 'to_guarded')
-          .row()
-          .text(t('btn_cycle'), 'to_cycle')
-          .text(t('btn_blocked'), 'to_blocked'),
-      }),
-      actions: {
-        next: (ctx, m) => m.goTo(ctx, 'form'),
-        to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
-        to_cycle: (ctx, m) => m.goTo(ctx, 'cycle_a'),
-        to_blocked: (ctx, m) => m.goTo(ctx, 'blocked'),
-        refresh: (ctx, m) => m.goTo(ctx, 'root'),
-        alert: async (ctx) => {
-          await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
+  const main = defineDialog<TestState, TestId, TestKeys>({
+    id: 'main',
+    entry: 'root',
+    windows: [
+      {
+        id: 'root',
+        render: (_ctx, t) => ({
+          text: t('root_text'),
+          keyboard: new InlineKeyboard()
+            .text(t('btn_next'), 'next')
+            .row()
+            .text(t('btn_guard'), 'to_guarded')
+            .row()
+            .text(t('btn_cycle'), 'to_cycle')
+            .text(t('btn_blocked'), 'to_blocked'),
+        }),
+        actions: {
+          next: (ctx, m) => m.goTo(ctx, 'form'),
+          to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
+          to_cycle: (ctx, m) => m.goTo(ctx, 'cycle_a'),
+          to_blocked: (ctx, m) => m.goTo(ctx, 'blocked'),
+          refresh: (ctx, m) => m.goTo(ctx, 'root'),
+          to_other: (ctx, m) => m.startDialog(ctx, 'other'),
+          alert: async (ctx) => {
+            await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
+          },
         },
       },
-    },
-    win({
-      id: 'form',
-      // Без клавиатуры — проверяем авто-добавление «Назад»
-      render: (ctx, t) => ({
-        text: ctx.session.data.error ? `ERR: ${ctx.session.data.error}` : t('form_text'),
+      win({
+        id: 'form',
+        render: (ctx, t) => ({
+          text: ctx.data.error ? `ERR: ${ctx.data.error}` : t('form_text'),
+        }),
+        formatter: (text) => {
+          if (text === 'boom') throw new Error('technical detail');
+          if (text === 'bad') throw new InputValidationError('Своя ошибка');
+          return text;
+        },
+        inputSchema: z.string().min(2, 'too short'),
+        onInput: (ctx, m, _t, value) => {
+          ctx.data.name = value;
+          return m.goTo(ctx, 'confirm');
+        },
+        actions: {
+          noop: (ctx, m) => m.show(ctx),
+          to_target: (ctx, m) => m.goTo(ctx, 'target'),
+        },
       }),
-      formatter: (text) => {
-        if (text === 'boom') throw new Error('technical detail');
-        if (text === 'bad') throw new InputValidationError('Своя ошибка');
-        return text;
+      {
+        id: 'confirm',
+        render: (ctx, t) => ({ text: t('confirm_text', { name: ctx.data.name ?? '' }) }),
       },
-      inputSchema: z.string().min(2, 'too short'),
-      onInput: (ctx, m, _t, value) => {
-        ctx.session.data.name = value;
-        return m.goTo(ctx, 'confirm');
+      {
+        id: 'guarded',
+        guard: () => 'target' as const,
+        render: (_ctx, t) => ({ text: t('guarded_text') }),
       },
-      actions: {
-        noop: (ctx, m) => m.show(ctx),
-        to_target: (ctx, m) => m.goTo(ctx, 'target'),
+      {
+        id: 'target',
+        render: (_ctx, t) => ({ text: t('target_text') }),
+        actions: { to_form: (ctx, m) => m.goTo(ctx, 'form') },
       },
-    }),
-    {
-      id: 'confirm',
-      render: (ctx, t) => ({ text: t('confirm_text', { name: ctx.session.data.name ?? '' }) }),
-    },
-    {
-      id: 'guarded',
-      guard: () => 'target' as const,
-      render: (_ctx, t) => ({ text: t('guarded_text') }),
-    },
-    {
-      id: 'target',
-      render: (_ctx, t) => ({ text: t('target_text') }),
-      actions: {
-        to_form: (ctx, m) => m.goTo(ctx, 'form'),
+      {
+        id: 'cycle_a',
+        guard: () => 'cycle_b' as const,
+        render: (_ctx, t) => ({ text: t('cycle_a_text') }),
       },
-    },
-    {
-      id: 'cycle_a',
-      guard: () => 'cycle_b' as const,
-      render: (_ctx, t) => ({ text: t('cycle_a_text') }),
-    },
-    {
-      id: 'cycle_b',
-      guard: () => 'cycle_a' as const,
-      render: (_ctx, t) => ({ text: t('cycle_b_text') }),
-    },
-    {
-      id: 'blocked',
-      guard: () => false,
-      render: (_ctx, t) => ({ text: t('blocked_text') }),
-      actions: {
-        should_not_run: (ctx) => { ctx.session.data.name = 'HACKED'; },
+      {
+        id: 'cycle_b',
+        guard: () => 'cycle_a' as const,
+        render: (_ctx, t) => ({ text: t('cycle_b_text') }),
       },
-    },
-  ]);
+      {
+        id: 'blocked',
+        guard: () => false,
+        render: (_ctx, t) => ({ text: t('blocked_text') }),
+        actions: { should_not_run: (ctx) => { ctx.data.name = 'HACKED'; } },
+      },
+    ],
+  });
+
+  const other = defineDialog<TestState, 'hello', TestKeys>({
+    id: 'other',
+    entry: 'hello',
+    windows: [
+      {
+        id: 'hello',
+        render: (ctx, t) => ({ text: `${t('hello_text')}: ${ctx.data.name ?? 'empty'}` }),
+        actions: {
+          set_name: (ctx, m) => { ctx.data.name = 'OTHER'; return m.show(ctx); },
+          back_to_main: (ctx, m) => m.startDialog(ctx, 'main'),
+        },
+      },
+    ],
+  });
+
+  return [main, other];
 }
 
 export interface ApiCall { method: string; payload: any }
 
 const now = () => Math.floor(Date.now() / 1000);
 
-// PrivateChat в актуальных типах требует first_name.
 const privateChat = (id: number): Chat.PrivateChat => ({
-  id,
-  type: 'private',
-  first_name: 'Tester',
+  id, type: 'private', first_name: 'Tester',
 });
 
-// Стаб: grammY читает из botInfo только id/username/is_bot/first_name.
-// Полный набор полей зависит от версии Bot API types — не дублируем его.
 const BOT_USER = {
-  id: 42,
-  is_bot: true,
-  first_name: 'Test',
-  username: 'test_bot',
+  id: 42, is_bot: true, first_name: 'Test', username: 'test_bot',
 } as unknown as UserFromGetMe;
 
 export async function createHarness(
-  windows: readonly WindowConfig<TestState, TestId, TestKeys, any>[] = baseWindows(),
+  dialogs: readonly DialogConfig<any, any, any>[] = baseDialogs(),
   options: {
-    rootWindowId?: TestId;
+    rootDialogId?: string;
     translations?: typeof testTranslations;
     maxNavigationDepth?: number;
     maxHistory?: number;
@@ -168,11 +179,10 @@ export async function createHarness(
   const calls: ApiCall[] = [];
   let messageId = 1000;
   let failEditNotModified = false;
-  let captured: DialogSession<TestState> | undefined;
+  let captured: DialogSession | undefined;
 
   const bot = new Bot<TestCtx>('123456:TEST-TOKEN-abcdefghijklmnopqrstuvwxyz');
 
-  // Перехватываем ВСЕ вызовы API — сети нет.
   bot.api.config.use(async (_prev, method, payload) => {
     calls.push({ method, payload });
     const ok = (result: unknown) => ({ ok: true, result }) as any;
@@ -213,21 +223,21 @@ export async function createHarness(
   await bot.init();
 
   bot.use(session({
-    initial: (): DialogSession<TestState> => ({ data: {}, lang: 'ru' }),
+    initial: (): DialogSession => ({ stack: [], lang: 'ru' }),
   }));
   bot.use(async (ctx, next) => { captured = ctx.session; await next(); });
 
   const manager = new DialogManager<TestState, TestId, TestKeys>(bot, {
     translations: options.translations ?? testTranslations,
     defaultLang: 'ru',
-    rootWindowId: options.rootWindowId ?? 'root',
+    rootDialogId: options.rootDialogId ?? 'main',
     maxNavigationDepth: options.maxNavigationDepth,
     maxHistory: options.maxHistory,
     onError: options.onError,
   });
-  manager.registerAll(windows);
+  for (const d of dialogs) manager.registerDialog(d);
 
-  bot.command('start', (ctx) => manager.start(ctx, 'root'));
+  bot.command('start', (ctx) => manager.restart(ctx, 'main'));
   bot.use(manager.middleware());
 
   const chatId = 100;
@@ -235,8 +245,6 @@ export async function createHarness(
   let updateId = 0;
 
   const sendText = (text: string) => {
-    // Telegram всегда присылает entities для команд;
-    // grammY матчит bot.command именно по ним, а не по префиксу текста.
     const entities = text.startsWith('/')
       ? [{
         type: 'bot_command' as const,
@@ -276,9 +284,25 @@ export async function createHarness(
       },
     } as Update);
 
+  const frame = () => {
+    const stack = captured?.stack;
+    return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+  };
+
   return {
     bot, manager, calls,
-    session: () => captured,
+    frame,
+    // Адаптер под прежние ассерты: «текущее окно / история / данные»
+    session: () => {
+      const f = frame();
+      return {
+        currentWindow: f?.window,
+        history: f?.history,
+        data: (f?.data ?? {}) as TestState & { error?: string },
+        lang: captured?.lang,
+        messageId: captured?.messageId,
+      };
+    },
     sendText, click,
     reset: () => { calls.length = 0; },
     failNextEditNotModified: () => { failEditNotModified = true; },
