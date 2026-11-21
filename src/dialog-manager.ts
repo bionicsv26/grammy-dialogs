@@ -167,6 +167,8 @@ export interface DialogManagerOptions<
   parseMode?: ParseMode | undefined;
   /** Лимит вложенных переходов на один апдейт (защита от циклов guard-редиректов). */
   maxNavigationDepth?: number | undefined;
+  /** Максимальная глубина стека истории (старые записи вытесняются). По умолчанию 50. */
+  maxHistory?: number | undefined;
 }
 
 /** Внутреннее стирание дженериков на границе хранения/коллекции. */
@@ -218,6 +220,7 @@ export class DialogManager<
   private rootWindowId: string | undefined;
   private parseMode: ParseMode;
   private maxNavigationDepth: number;
+  private maxHistory: number;
   private navDepth = new WeakMap<object, number>();
   private handlingError = new WeakSet<object>();
   private bot: Bot<any>;
@@ -232,6 +235,7 @@ export class DialogManager<
     this.rootWindowId = options?.rootWindowId;
     this.parseMode = options?.parseMode ?? 'HTML';
     this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
+    this.maxHistory = Math.max(0, options?.maxHistory ?? 50);
 
     // Core-дефолты как база; пользовательские переводы перекрывают их.
     const merged: Record<string, Record<string, string>> = {};
@@ -374,6 +378,16 @@ export class DialogManager<
 
       logger.info(`Starting dialog at window`, { userId: ctx.from?.id, windowId });
 
+      // Снимаем клавиатуру прошлого сообщения: иначе его кнопки останутся
+      // активными и будут «стрелять» в контексте нового диалога.
+      if (ctx.session.messageId && ctx.chat) {
+        await ctx.api
+          .editMessageReplyMarkup(ctx.chat.id, ctx.session.messageId, {
+            reply_markup: { inline_keyboard: [] },
+          })
+          .catch(() => { });
+      }
+
       ctx.session.currentWindow = windowId;
       ctx.session.data = { ...initialData } as DialogSession<TState>['data'];
       delete ctx.session.messageId;
@@ -410,7 +424,11 @@ export class DialogManager<
 
       const currentWindow = ctx.session.currentWindow;
 
-      if (currentWindow === windowId) return;
+      // Переход в то же окно = перерисовка (например, экшен «обновить»).
+      if (currentWindow === windowId) {
+        await this.show(ctx);
+        return;
+      }
 
       if (!ctx.session.history) {
         ctx.session.history = [];
@@ -421,6 +439,9 @@ export class DialogManager<
         ctx.session.history = [];
       } else if (options.pushHistory !== false && currentWindow) {
         ctx.session.history.push(currentWindow);
+        if (ctx.session.history.length > this.maxHistory) {
+          ctx.session.history.splice(0, ctx.session.history.length - this.maxHistory);
+        }
       }
 
       logger.info(`User navigated to window`, {

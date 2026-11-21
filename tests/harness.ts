@@ -66,6 +66,7 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
         to_guarded: (ctx, m) => m.goTo(ctx, 'guarded'),
         to_cycle: (ctx, m) => m.goTo(ctx, 'cycle_a'),
         to_blocked: (ctx, m) => m.goTo(ctx, 'blocked'),
+        refresh: (ctx, m) => m.goTo(ctx, 'root'),
         alert: async (ctx) => {
           await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
         },
@@ -82,7 +83,10 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
         ctx.session.data.name = value;
         return m.goTo(ctx, 'confirm');
       },
-      actions: { noop: (ctx, m) => m.show(ctx) },
+      actions: {
+        noop: (ctx, m) => m.show(ctx),
+        to_target: (ctx, m) => m.goTo(ctx, 'target'),
+      },
     }),
     {
       id: 'confirm',
@@ -96,6 +100,9 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
     {
       id: 'target',
       render: (_ctx, t) => ({ text: t('target_text') }),
+      actions: {
+        to_form: (ctx, m) => m.goTo(ctx, 'form'),
+      },
     },
     {
       id: 'cycle_a',
@@ -144,6 +151,7 @@ export async function createHarness(
     rootWindowId?: TestId;
     translations?: typeof testTranslations;
     maxNavigationDepth?: number;
+    maxHistory?: number;
     onError?: (
       error: unknown,
       ctx: TestCtx,
@@ -208,6 +216,7 @@ export async function createHarness(
     defaultLang: 'ru',
     rootWindowId: options.rootWindowId ?? 'root',
     maxNavigationDepth: options.maxNavigationDepth,
+    maxHistory: options.maxHistory,
     onError: options.onError,
   });
   manager.registerAll(windows);

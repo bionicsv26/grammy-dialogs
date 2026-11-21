@@ -14,6 +14,23 @@ describe('DialogManager', () => {
     expect(h.methods().filter((m) => m === 'sendMessage')).toHaveLength(1);
   });
 
+  it('start: снимает клавиатуру прошлого сообщения', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    const first = h.session()?.messageId;
+    h.reset();
+
+    await h.sendText('/start');
+
+    const strip = h.calls.find((c) => c.method === 'editMessageReplyMarkup');
+    expect(strip?.payload).toMatchObject({
+      message_id: first,
+      reply_markup: { inline_keyboard: [] },
+    });
+    expect(h.methods()).toContain('sendMessage');
+    expect(h.session()?.messageId).not.toBe(first);
+  });
+
   it('goTo: редактирует то же сообщение и пишет историю', async () => {
     const h = await createHarness();
     await h.sendText('/start');
@@ -25,6 +42,18 @@ describe('DialogManager', () => {
     expect(h.session()?.history).toEqual(['root']);
     expect(h.methods()).toContain('editMessageText');
     expect(h.methods()).not.toContain('sendMessage');
+  });
+
+  it('goTo в то же окно перерисовывает, а не игнорируется', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    h.reset();
+
+    await h.click('refresh');
+
+    expect(h.session()?.currentWindow).toBe('root');
+    expect(h.session()?.history).toEqual([]);
+    expect(h.methods()).toContain('editMessageText');
   });
 
   it('back: авто-кнопка на окне без клавиатуры + возврат по __dm:back', async () => {
@@ -42,6 +71,16 @@ describe('DialogManager', () => {
     await h.click(coreCallbacks.back);
     expect(h.session()?.currentWindow).toBe('root');
     expect(h.session()?.history).toEqual([]);
+  });
+
+  it('maxHistory: старые записи вытесняются', async () => {
+    const h = await createHarness(undefined, { maxHistory: 2 });
+    await h.sendText('/start');
+    await h.click('next');      // form,   ['root']
+    await h.click('to_target'); // target, ['root','form']
+    await h.click('to_form');   // form,   ['root','form','target'] → обрезка
+
+    expect(h.session()?.history).toEqual(['form', 'target']);
   });
 
   it('not-modified: не отправляет дубль сообщения', async () => {
