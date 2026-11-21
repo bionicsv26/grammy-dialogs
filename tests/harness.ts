@@ -5,6 +5,7 @@ import {
   DialogManager,
   defineWindow,
   defineWindows,
+  InputValidationError,
   type CoreTranslationKey,
   type DialogContext,
   type DialogSession,
@@ -78,6 +79,11 @@ export function baseWindows(): readonly WindowConfig<TestState, TestId, TestKeys
       render: (ctx, t) => ({
         text: ctx.session.data.error ? `ERR: ${ctx.session.data.error}` : t('form_text'),
       }),
+      formatter: (text) => {
+        if (text === 'boom') throw new Error('technical detail');
+        if (text === 'bad') throw new InputValidationError('Своя ошибка');
+        return text;
+      },
       inputSchema: z.string().min(2, 'too short'),
       onInput: (ctx, m, _t, value) => {
         ctx.session.data.name = value;

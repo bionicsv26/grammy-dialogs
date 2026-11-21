@@ -122,6 +122,14 @@ export type WindowGuard<
 
 export type WindowInputFormatter<TValue = string> = (rawInput: string) => TValue;
 
+/** Бросай из formatter, чтобы показать пользователю своё сообщение об ошибке. */
+export class InputValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InputValidationError';
+  }
+}
+
 export interface WindowConfig<
   TState extends Record<string, any>,
   TId extends string,
@@ -444,6 +452,9 @@ export class DialogManager<
         }
       }
 
+      // Уходим с окна — его ошибка ввода больше не актуальна.
+      delete ctx.session.data.error;
+
       logger.info(`User navigated to window`, {
         userId: ctx.from?.id,
         fromWindow: currentWindow,
@@ -475,6 +486,7 @@ export class DialogManager<
         remainingHistory: ctx.session.history.length,
       });
 
+      delete ctx.session.data.error;
       ctx.session.currentWindow = previousWindow;
       await this.show(ctx);
     } catch (error) {
@@ -712,7 +724,29 @@ export class DialogManager<
           await ctx.deleteMessage().catch(() => { });
 
           const rawInput = ctx.message.text.trim();
-          let value: unknown = window.formatter ? window.formatter(rawInput) : rawInput;
+          let value: unknown = rawInput;
+
+          if (window.formatter) {
+            try {
+              value = window.formatter(rawInput);
+            } catch (error) {
+              const userMessage =
+                error instanceof InputValidationError
+                  ? error.message
+                  : t('invalid_format');
+
+              logger.warn(`Window input formatter failed`, {
+                userId,
+                windowId,
+                inputLength: rawInput.length,
+                error,
+              });
+
+              ctx.session.data.error = userMessage;
+              await this.show(ctx);
+              return;
+            }
+          }
 
           if (window.inputSchema) {
             const parseResult = window.inputSchema.safeParse(value);

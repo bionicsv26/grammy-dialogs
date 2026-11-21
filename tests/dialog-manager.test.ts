@@ -164,6 +164,45 @@ describe('DialogManager', () => {
     expect(h.lastPayload('editMessageText').text).toContain('A&lt;&amp;&gt;');
   });
 
+  it('formatter: обычное исключение = ошибка валидации, а не сброс диалога', async () => {
+    const errors: unknown[] = [];
+    const h = await createHarness(undefined, { onError: (e) => { errors.push(e); } });
+    await h.sendText('/start');
+    await h.click('next');
+    h.reset();
+
+    await h.sendText('boom');
+
+    expect(h.session()?.currentWindow).toBe('form');
+    expect(h.session()?.data.error).toBe(coreTranslations.ru.invalid_format);
+    expect(h.methods()).not.toContain('sendMessage');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('formatter: InputValidationError отдаёт своё сообщение', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('next');
+
+    await h.sendText('bad');
+
+    expect(h.session()?.currentWindow).toBe('form');
+    expect(h.session()?.data.error).toBe('Своя ошибка');
+  });
+
+  it('ошибка ввода: живёт при перерисовке, очищается при уходе с окна', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('next');
+    await h.sendText('a');
+
+    await h.click('noop'); // перерисовка того же окна
+    expect(h.lastPayload('editMessageText').text).toContain('ERR: too short');
+
+    await h.click('to_target'); // уходим с окна
+    expect(h.session()?.data.error).toBeUndefined();
+  });
+
   // ─── i18n ─────────────────────────────────────────────────────────────────
   it('i18n: смена языка через __dm:lang:en перерисовывает окно', async () => {
     const h = await createHarness();

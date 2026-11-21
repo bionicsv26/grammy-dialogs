@@ -64,9 +64,8 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
     win({
       id: 'ask_name',
       disableBackButton: true,
-      render: async (ctx, t) => {
-        const error = ctx.session.data.error;
-        delete ctx.session.data.error;
+      render: (ctx, t) => {
+        const error = ctx.session.data.error; // только читаем: render чистый
 
         const isEditing = ctx.session.data.returnTo === 'summary';
         const backAction = isEditing ? 'cancel_edit_name' : 'main_menu';
@@ -98,12 +97,10 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
       },
       actions: {
         main_menu: async (ctx, manager) => {
-          delete ctx.session.data.error;
           await manager.goTo(ctx, 'main_menu');
         },
         cancel_edit_name: async (ctx, manager) => {
           delete ctx.session.data.returnTo;
-          delete ctx.session.data.error;
           await manager.goTo(ctx, 'summary');
         },
       },
@@ -262,7 +259,7 @@ export function createQuestionnaireWindows<TState extends QuestionnaireState>() 
       },
     },
 
-    // Админ-панель
+    // Админ-панель (guard чистый: сайд-эффекты в экшене open_admin)
     {
       id: 'admin_panel',
       guard: (ctx) => (isUserAdmin(ctx.from?.id) ? true : 'main_menu'),
