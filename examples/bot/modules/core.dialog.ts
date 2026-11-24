@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { defineDialog, coreCallbacks } from '../dialog-manager.js';
+import { defineDialog, coreCallbacks } from '../../../src/core/dialog-manager.js';
 import { isUserAdmin } from '../utils/auth.js';
 import type { AppTranslationKeys } from '../translations.js';
 import { D, R } from './dialog-ids.js';

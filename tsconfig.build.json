@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSources": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src/core"
+  },
+  "include": [
+    "src/core"
+  ],
+  "exclude": [
+    "tests",
+    "examples",
+    "dist",
+    "node_modules"
+  ]
+}

@@ -4,7 +4,7 @@ import {
   coreCallbacks,
   type TranslationFunction,
   type WindowActionHandler,
-} from '../dialog-manager.js';
+} from '../../../src/core/dialog-manager.js';
 import type { AppTranslationKeys } from '../translations.js';
 import { D, R } from './dialog-ids.js';
 

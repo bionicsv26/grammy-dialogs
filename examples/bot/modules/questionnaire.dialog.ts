@@ -4,7 +4,7 @@ import {
   defineWindow,
   type DialogContext,
   type WindowActionHandler,
-} from '../dialog-manager.js';
+} from '../../../src/core/dialog-manager.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
@@ -12,7 +12,7 @@ import {
   nameSchema,
   createInterestsSchema,
 } from '../schemas/questionnaire.schema.js';
-import { escapeHtml } from '../utils/parse-mode.js';
+import { escapeHtml } from '../../../src/core/parse-mode.js';
 import type { AppTranslationKeys } from '../translations.js';
 import { D, R } from './dialog-ids.js';
 

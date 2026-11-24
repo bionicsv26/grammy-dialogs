@@ -11,7 +11,7 @@ import {
   type DialogContext,
   type DialogSession,
   type DialogLogger,
-} from '../src/dialog-manager.js';
+} from '../src/core/dialog-manager.js';
 
 export interface TestState {
   name?: string;

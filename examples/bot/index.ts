@@ -7,7 +7,7 @@ import {
   DialogManager,
   type DialogContext,
   type DialogSession,
-} from './dialog-manager.js';
+} from '../../src/core/dialog-manager.js';
 import { translations, type AppTranslationKeys } from './translations.js';
 import { config } from './config.js';
 import { logger } from './logger.js';

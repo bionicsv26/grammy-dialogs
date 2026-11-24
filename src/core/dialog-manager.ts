@@ -1,7 +1,7 @@
 import { Context, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
-import { isMessageNotModified } from './utils/telegram-errors.js';
-import { escapeForMode, type ParseMode } from './utils/parse-mode.js';
+import { isMessageNotModified } from './telegram-errors.js';
+import { escapeForMode, type ParseMode } from './parse-mode.js';
 
 // ─── Встроенные core-переводы ядра ──────────────────────────────────────────
 const coreRu = {

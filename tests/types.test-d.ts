@@ -5,7 +5,7 @@ import {
   type DialogContext,
   type DialogManager,
   type TranslationFunction,
-} from '../src/dialog-manager.js';
+} from '../src/core/dialog-manager.js';
 import type { TestId, TestKeys, TestState } from './harness.js';
 
 declare const manager: DialogManager<TestState, TestId, TestKeys>;

@@ -1,31 +1,45 @@
 {
-  "name": "telegram-dialog-bot",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "keywords": [],
+  "name": "@bionicsv/grammy-dialogs",
+  "version": "0.1.0",
+  "description": "Type-safe dialog manager for grammY, inspired by aiogram-dialog",
+  "keywords": ["grammy", "telegram", "bot", "dialog", "state-machine", "typescript", "i18n"],
   "author": "",
   "license": "ISC",
   "type": "module",
-  "devDependencies": {
-    "@types/node": "^26.6.5",
-    "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
-    "vitest": "^5.1.1"
+  "sideEffects": false,
+  "files": ["dist"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
-  "dependencies": {
+  "publishConfig": { "access": "public" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "tsx watch examples/bot/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "grammy": "^1.46.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/storage-redis": "^2.6.0",
+    "@types/node": "^26.6.5",
     "dotenv": "^18.0.9",
     "grammy": "^1.46.0",
     "ioredis": "^6.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^4.6.7"

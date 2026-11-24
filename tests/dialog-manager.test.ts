@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coreCallbacks, coreTranslations, defineDialog } from '../src/dialog-manager.js';
+import { coreCallbacks, coreTranslations, defineDialog } from '../src/core/dialog-manager.js';
 import { createHarness, type TestKeys, type TestState } from './harness.js';
 
 describe('DialogManager', () => {
