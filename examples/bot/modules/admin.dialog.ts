@@ -14,7 +14,7 @@ export function createAdminDialog() {
   const win = defineWindow<AdminState, AdminWindowId, AppTranslationKeys>();
 
   return defineDialog<AdminState, AdminWindowId, AppTranslationKeys>({
-    id: 'D.admin',
+    id: D.admin,
     windows: [
       {
         id: 'admin_panel',

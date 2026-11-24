@@ -141,6 +141,14 @@ manager
   .registerDialog(createBranchingDialog())
   .registerDialog(createAdminDialog());
 
+const registered = new Set(manager.registeredDialogIds());
+for (const id of Object.values(D)) {
+  if (!registered.has(id)) {
+    throw new Error(`Dialog "${id}" is declared in D but not registered`);
+  }
+}
+logger.info(`Диалоги зарегистрированы`, { dialogs: [...registered] });
+
 // 7. /start (до middleware менеджера)
 bot.command('start', async (ctx) => {
   const frame = manager.getFrame(ctx);

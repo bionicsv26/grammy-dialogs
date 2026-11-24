@@ -374,6 +374,11 @@ export class DialogManager<
     return stack[stack.length - 1];
   }
 
+    /** ID зарегистрированных диалогов — для стартовой диагностики. */
+  public registeredDialogIds(): string[] {
+    return [...this.dialogs.keys()];
+  }
+
   private bind(ctx: DialogContext<any>): DialogFrame | undefined {
     const frame = this.getFrame(ctx);
     if (frame) {

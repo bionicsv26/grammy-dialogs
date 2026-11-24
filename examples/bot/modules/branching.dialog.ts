@@ -8,6 +8,10 @@ import {
 import type { AppTranslationKeys } from '../translations.js';
 import { D, R } from './dialog-ids.js';
 
+// Для демо — публичная картинка. В реальном коде лучше file_id или InputFile:
+// URL Telegram скачивает сам при каждой отправке.
+const TECH_IMAGE_URL = 'https://picsum.photos/seed/tech/800/400';
+
 export interface BranchingState {
   chosenBranch?: 'tech' | 'design' | 'business';
 }
@@ -29,7 +33,7 @@ export function createBranchingDialog() {
   };
 
   return defineDialog<BranchingState, Id, AppTranslationKeys>({
-    id: 'D.branching',
+    id: D.branching,
     windows: [
       {
         id: 'select_branch',
@@ -59,7 +63,12 @@ export function createBranchingDialog() {
       },
       {
         id: 'window_tech_step',
-        render: (_ctx, t) => ({ text: t('tech_step_text'), keyboard: branchKeyboard(t) }),
+        render: (_ctx, t) => ({
+          kind: 'photo' as const,
+          photo: TECH_IMAGE_URL,
+          caption: t('tech_step_text'),
+          keyboard: branchKeyboard(t),
+        }),
         actions: branchActions,
       },
       {
