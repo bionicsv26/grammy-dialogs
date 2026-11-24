@@ -411,4 +411,61 @@ describe('DialogManager', () => {
     expect(rec?.meta).not.toHaveProperty('rawInput');
     expect(JSON.stringify(rec?.meta)).not.toContain('secret-name');
   });
+
+  // ─── Медиа ────────────────────────────────────────────────────────────────
+  it('text → photo: заменяет сообщение и запоминает тип', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    h.reset();
+
+    await h.click('to_pic');
+
+    expect(h.methods()).toContain('deleteMessage');
+    expect(h.methods()).toContain('sendPhoto');
+    expect(h.methods()).not.toContain('editMessageText');
+    expect(h.session()?.messageKind).toBe('photo');
+  });
+
+  it('photo → photo: редактируется на месте через editMessageMedia', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_pic');
+    const before = h.session()?.messageId;
+    h.reset();
+
+    await h.click('swap');
+
+    expect(h.methods()).toContain('editMessageMedia');
+    expect(h.methods()).not.toContain('sendPhoto');
+    expect(h.methods()).not.toContain('deleteMessage');
+    expect(h.session()?.messageId).toBe(before);
+  });
+
+  it('photo → text: снова замена с удалением', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_pic');
+    h.reset();
+
+    await h.click('to_root');
+
+    expect(h.methods()).toContain('deleteMessage');
+    expect(h.methods()).toContain('sendMessage');
+    expect(h.session()?.messageKind).toBe('text');
+  });
+
+  it('not-modified на медиа не плодит дублей', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_pic');
+    const before = h.session()?.messageId;
+    h.reset();
+
+    h.failNextEditNotModified();
+    await h.click('noop');
+
+    expect(h.methods()).toContain('editMessageMedia');
+    expect(h.methods()).not.toContain('sendPhoto');
+    expect(h.session()?.messageId).toBe(before);
+  });
 });

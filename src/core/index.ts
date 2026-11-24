@@ -13,6 +13,7 @@ export {
     type DialogConfig,
     type DialogManagerOptions,
     type DialogLogger,
+    type MediaKind,
     type WindowConfig,
     type WindowRenderResult,
     type WindowActionHandler,

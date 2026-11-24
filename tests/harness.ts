@@ -18,11 +18,11 @@ export interface TestState {
 }
 
 export type TestId =
-  | 'root' | 'form' | 'confirm' | 'guarded' | 'target' | 'cycle_a' | 'cycle_b' | 'blocked';
+  | 'root' | 'form' | 'confirm' | 'guarded' | 'target' | 'cycle_a' | 'cycle_b' | 'blocked' | 'pic';
 
 export type TestKeys =
   | 'root_text' | 'form_text' | 'confirm_text' | 'guarded_text' | 'target_text'
-  | 'cycle_a_text' | 'cycle_b_text' | 'blocked_text' | 'hello_text'
+  | 'cycle_a_text' | 'cycle_b_text' | 'blocked_text' | 'hello_text' | 'pic_text'
   | 'btn_next' | 'btn_guard' | 'btn_noop' | 'btn_cycle' | 'btn_blocked';
 
 export type TestCtx = DialogContext<TestState>;
@@ -36,6 +36,7 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
     btn_next: 'Дальше', btn_guard: 'В защищённое', btn_noop: 'Обновить',
     btn_cycle: 'В цикл', btn_blocked: 'В закрытое',
     // btn_back НАМЕРЕННО отсутствует — проверяем core-дефолт
+    pic_text: 'Картинка',
   },
   en: {
     root_text: 'Root', form_text: 'Form', confirm_text: 'Done: {name}',
@@ -44,6 +45,7 @@ export const testTranslations: Record<string, Partial<Record<TestKeys | CoreTran
     hello_text: 'Other dialog',
     btn_next: 'Next', btn_guard: 'To guarded', btn_noop: 'Refresh',
     btn_cycle: 'To cycle', btn_blocked: 'To blocked',
+    pic_text: 'Picture',
   },
 };
 
@@ -80,6 +82,7 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
             await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
           },
           finish_root: (ctx, m) => m.done(ctx),
+          to_pic: (ctx, m) => m.goTo(ctx, 'pic'),
         },
       },
       win({
@@ -132,6 +135,19 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
         guard: () => false,
         render: (_ctx, t) => ({ text: t('blocked_text') }),
         actions: { should_not_run: (ctx) => { ctx.data.name = 'HACKED'; } },
+      },
+      {
+        id: 'pic',
+        render: (ctx, t) => ({
+          kind: 'photo' as const,
+          photo: 'photo-file-id',
+          caption: ctx.data.name === 'swapped' ? `${t('pic_text')} 2` : t('pic_text'),
+        }),
+        actions: {
+          swap: (ctx, m) => { ctx.data.name = 'swapped'; return m.show(ctx); },
+          noop: (ctx, m) => m.show(ctx),
+          to_root: (ctx, m) => m.goTo(ctx, 'root'),
+        },
       },
     ],
   });
@@ -198,27 +214,31 @@ export async function createHarness(
     switch (method) {
       case 'getMe':
         return ok(BOT_USER);
-      case 'sendMessage': {
+      case 'sendMessage':
+      case 'sendPhoto':
+      case 'sendDocument':
+      case 'sendVideo':
+      case 'sendAnimation': {
         const p = payload as any;
         const msg = {
           message_id: ++messageId,
           date: now(),
           chat: privateChat(Number(p.chat_id)),
-          text: p.text,
         } as Message;
         return ok(msg);
       }
       case 'editMessageText':
+      case 'editMessageMedia':
         if (failEditNotModified) {
           failEditNotModified = false;
           throw new GrammyError(
-            "Call to 'editMessageText' failed!",
+            `Call to '${method}' failed!`,
             {
               ok: false,
               error_code: 400,
               description: 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
             },
-            'editMessageText',
+            method,
             payload as Record<string, unknown>
           );
         }
@@ -319,6 +339,7 @@ export async function createHarness(
         data: (f?.data ?? {}) as TestState & { error?: string },
         lang: captured?.lang,
         messageId: captured?.messageId,
+        messageKind: captured?.messageKind,
       };
     },
     sendText, click,

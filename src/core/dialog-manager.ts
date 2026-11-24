@@ -1,4 +1,5 @@
-import { Context, InlineKeyboard } from 'grammy';
+import { Context, InlineKeyboard, InputFile } from 'grammy';
+import type { InputMedia } from 'grammy/types';
 import { z } from 'zod';
 import { isMessageNotModified } from './telegram-errors.js';
 import { escapeForMode, type ParseMode } from './parse-mode.js';
@@ -73,6 +74,7 @@ export interface DialogFrame {
 export interface DialogSession {
   lang?: string;
   messageId?: number;
+  messageKind?: 'text' | MediaKind;
   stack: DialogFrame[]; // последний элемент — активный диалог
 }
 
@@ -90,10 +92,14 @@ export type TranslationFunction<TKeys extends string = string> = (
   params?: Record<string, string | number>
 ) => string;
 
-export type WindowRenderResult = {
-  text: string;
-  keyboard?: InlineKeyboard;
-};
+export type MediaKind = 'photo' | 'document' | 'video' | 'animation';
+
+export type WindowRenderResult =
+  | { kind?: 'text'; text: string; keyboard?: InlineKeyboard }
+  | { kind: 'photo'; photo: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
+  | { kind: 'document'; document: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
+  | { kind: 'video'; video: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
+  | { kind: 'animation'; animation: InputFile | string; caption?: string; keyboard?: InlineKeyboard };
 
 export type WindowActionHandler<
   TState extends Record<string, any>,
@@ -239,6 +245,45 @@ type AnyErrorHandler = (
 interface RegisteredDialog {
   entry: string;
   windows: Map<string, AnyWindowConfig>;
+}
+
+type RenderContent =
+  | { kind: 'text'; text: string }
+  | { kind: MediaKind; file: InputFile | string; caption?: string | undefined };
+
+function toContent(r: WindowRenderResult): RenderContent {
+  if (r.kind === undefined || r.kind === 'text') {
+    return { kind: 'text', text: r.text };
+  }
+  switch (r.kind) {
+    case 'photo':
+      return { kind: 'photo', file: r.photo, caption: r.caption };
+    case 'document':
+      return { kind: 'document', file: r.document, caption: r.caption };
+    case 'video':
+      return { kind: 'video', file: r.video, caption: r.caption };
+    case 'animation':
+      return { kind: 'animation', file: r.animation, caption: r.caption };
+    default:
+      throw new Error(`Unsupported render result kind`);
+  }
+}
+
+function toInputMedia(
+  c: { kind: MediaKind; file: InputFile | string; caption?: string | undefined },
+  parseMode: ParseMode
+): InputMedia {
+  const common = {
+    media: c.file,
+    parse_mode: parseMode,
+    ...(c.caption !== undefined && { caption: c.caption }),
+  };
+  switch (c.kind) {
+    case 'photo': return { type: 'photo', ...common };
+    case 'document': return { type: 'document', ...common };
+    case 'video': return { type: 'video', ...common };
+    case 'animation': return { type: 'animation', ...common };
+  }
 }
 
 // ─── Менеджер диалогов ──────────────────────────────────────────────────────
@@ -394,6 +439,25 @@ export class DialogManager<
     await ctx.answerCallbackQuery(other).catch(() => { });
   }
 
+  private async sendContent(
+    ctx: DialogContext<TState>,
+    content: RenderContent,
+    other: { parse_mode: ParseMode; reply_markup?: InlineKeyboard }
+  ) {
+    if (content.kind === 'text') return ctx.reply(content.text, other);
+
+    const mediaOther = {
+      ...other,
+      ...(content.caption !== undefined && { caption: content.caption }),
+    };
+    switch (content.kind) {
+      case 'photo': return ctx.replyWithPhoto(content.file, mediaOther);
+      case 'document': return ctx.replyWithDocument(content.file, mediaOther);
+      case 'video': return ctx.replyWithVideo(content.file, mediaOther);
+      case 'animation': return ctx.replyWithAnimation(content.file, mediaOther);
+    }
+  }
+
   private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
     const frame = this.getFrame(ctx);
     this.log.error(`DialogManager execution error`, {
@@ -528,6 +592,7 @@ export class DialogManager<
           .catch(() => { });
       }
       delete ctx.session.messageId;
+      delete ctx.session.messageKind;
       await this.resetDialog(ctx, dialogId, options);
     } catch (error) {
       await this.handleError(error, ctx);
@@ -637,11 +702,10 @@ export class DialogManager<
       }
 
       const rendered = await window.render(ctx, t);
-      const text = rendered.text;
+      const content = toContent(rendered);
       let keyboard = rendered.keyboard;
 
       const shouldShowBack = frame.history.length > 0 && !window.disableBackButton;
-
       if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
           keyboard ?? new InlineKeyboard(),
@@ -659,14 +723,35 @@ export class DialogManager<
         }
       }
 
+      if (content.kind !== 'text' && content.caption && content.caption.length > 1024) {
+        this.log.warn(`Media caption exceeds Telegram limit`, {
+          windowId: frame.window, length: content.caption.length,
+        });
+      }
+
       const otherOptions: { parse_mode: ParseMode; reply_markup?: InlineKeyboard } = {
         parse_mode: this.parseMode,
       };
       if (keyboard) otherOptions.reply_markup = keyboard;
 
-      if (ctx.session.messageId && ctx.chat) {
+      const prevId = ctx.session.messageId;
+      const prevKind = ctx.session.messageKind ?? 'text';
+      // Текст и медиа редактируются по-разному; переход между ними — только заменой.
+      const sameFamily = (content.kind === 'text') === (prevKind === 'text');
+
+      if (prevId !== undefined && ctx.chat && sameFamily) {
         try {
-          await ctx.api.editMessageText(ctx.chat.id, ctx.session.messageId, text, otherOptions);
+          if (content.kind === 'text') {
+            await ctx.api.editMessageText(ctx.chat.id, prevId, content.text, otherOptions);
+          } else {
+            await ctx.api.editMessageMedia(
+              ctx.chat.id,
+              prevId,
+              toInputMedia(content, this.parseMode),
+              keyboard ? { reply_markup: keyboard } : {}
+            );
+            ctx.session.messageKind = content.kind;
+          }
           return;
         } catch (error) {
           if (isMessageNotModified(error)) {
@@ -675,12 +760,18 @@ export class DialogManager<
           }
           this.log.debug(`Failed to edit message, sending a new one`, { userId, error });
           delete ctx.session.messageId;
+          delete ctx.session.messageKind;
         }
+      } else if (prevId !== undefined && ctx.chat) {
+        await ctx.api.deleteMessage(ctx.chat.id, prevId).catch(() => { });
+        delete ctx.session.messageId;
+        delete ctx.session.messageKind;
       }
 
       if (ctx.chat) {
-        const msg = await ctx.reply(text, otherOptions);
+        const msg = await this.sendContent(ctx, content, otherOptions);
         ctx.session.messageId = msg.message_id;
+        ctx.session.messageKind = content.kind;
       }
     } catch (error) {
       await this.handleError(error, ctx);
