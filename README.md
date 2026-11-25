@@ -186,6 +186,33 @@ Namespace `__dm:` зарезервирован: свои экшены с так�
 | `maxHistory` | 50 | глубина стека окон |
 | `onError` | ответ `error_fallback` | обработчик ошибок диалога |
 
+## Testing your dialogs
+
+Диалоги тестируются без сети и без Telegram: все вызовы API перехватываются.
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { createDialogTest } from '@bionicsv/grammy-dialogs/testing';
+import { myDialog } from './my-dialog.js';
+
+it('приводит к экрану приветствия', async () => {
+  const t = await createDialogTest({ dialogs: [myDialog], rootDialogId: 'main' });
+
+  await t.sendText('/start');
+  expect(t.frame()?.window).toBe('greet');
+  expect(t.lastText()).toContain('Привет');
+
+  await t.click('to_name');
+  await t.sendText('Анна');
+  expect(t.data().name).toBe('Анна');
+});
+```
+
+Доступно: `calls` / `methods()` / `lastPayload()` / `lastText()` / `lastKeyboard()`,
+`session()` / `frame()` / `stack()` / `data()`, `logs`, `reset()`,
+`failNextEditNotModified()` и `failNextEdit()` для проверки путей ошибок,
+`languageCode` для проверки автоопределения языка, `setup` для своей проводки команд.
+
 ## Требования
 
 Сессия должна инициализироваться как `{ stack: [] }`. При конкурентной обработке апдейтов (runner, вебхуки) ставь `sequentialize` **до** session с тем же ключом.
