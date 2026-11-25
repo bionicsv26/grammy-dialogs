@@ -1,6 +1,6 @@
 {
   "name": "@bionicsv/grammy-dialogs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Type-safe dialog manager for grammY, inspired by aiogram-dialog",
   "keywords": [
     "grammy",

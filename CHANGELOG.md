@@ -8,11 +8,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-25
+
 ### Added
-- Автоопределение языка из `ctx.from.language_code` при первом контакте (опция `negotiateLanguage`, по умолчанию включена).
-- отдельный модуль `@bionicsv/grammy-dialogs/testing`, предназначенный для тестов — например, чтобы запускать тестового бота без сети, записывать вызовы API и имитировать ошибки редактирования сообщений, иметь доступ к фреймам и логам.
+- Автоопределение языка из `ctx.from.language_code` при первом контакте: `en-US` → `en`, только при наличии словаря, иначе `defaultLang`. Явный выбор пользователя всегда приоритетнее. Отключается опцией `negotiateLanguage: false`.
+- Публичный сабпуть `@bionicsv/grammy-dialogs/testing`: тестовый бот без сети (`createDialogTest`), запись вызовов API, симуляция ошибок редактирования, доступ к фреймам, состоянию и логам.
+- `CHANGELOG.md` включён в публикуемый пакет.
 
-
+### Fixed
+- Примеры больше не задают `lang` в `initial` сессии — это отключало автоопределение языка.
+- Ссылки на репозиторий в метаданных пакета вели на несуществующий адрес.
 
 ## [0.1.0] — 2026-11-25
 
@@ -70,5 +75,6 @@
 - Пример бота (`examples/bot`) и компилируемый quickstart (`examples/quickstart`), оба под `typecheck`.
 - 35 тестов ядра на Vitest с перехватом Telegram API через transformer.
 
-[Unreleased]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.1.0
