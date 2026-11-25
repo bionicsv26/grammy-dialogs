@@ -22,18 +22,20 @@ export interface LogRecord {
 }
 
 export interface DialogTestOptions<TState extends Record<string, any>> {
-  dialogs?: readonly DialogConfig<any, any, any>[];
-  managerOptions?: DialogManagerOptions<TState, string, string>;
+  dialogs?: readonly DialogConfig<any, any, any>[] | undefined;
+  managerOptions?: DialogManagerOptions<TState, string, string> | undefined;
   /** Если задан и не передан setup — ставится /start → restart(rootDialogId). */
-  rootDialogId?: string;
+  rootDialogId?: string | undefined;
   /** Значение ctx.from.language_code для проверки negotiation. */
-  languageCode?: string;
-  chatId?: number;
+  languageCode?: string | undefined;
+  chatId?: number | undefined;
   /** Своя проводка: команды и middleware ДО manager.middleware(). */
-  setup?: (
+  setup?:
+  | ((
     bot: Bot<DialogContext<TState>>,
     manager: DialogManager<TState, string, string>
-  ) => void | Promise<void>;
+  ) => void | Promise<void>)
+  | undefined;
 }
 
 export interface DialogTest<TState extends Record<string, any>> {
