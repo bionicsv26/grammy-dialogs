@@ -193,6 +193,8 @@ export async function createHarness(
     maxNavigationDepth?: number;
     maxHistory?: number;
     maxDialogDepth?: number;
+    languageCode?: string;
+    negotiateLanguage?: boolean;
     onError?: (
       error: unknown,
       ctx: TestCtx,
@@ -251,7 +253,7 @@ export async function createHarness(
   await bot.init();
 
   bot.use(session({
-    initial: (): DialogSession => ({ stack: [], lang: 'ru' }),
+    initial: (): DialogSession => ({ stack: [] }),
   }));
   bot.use(async (ctx, next) => { captured = ctx.session; await next(); });
   const logs: { level: string; message: string; meta?: Record<string, unknown> }[] = [];
@@ -270,6 +272,7 @@ export async function createHarness(
     maxNavigationDepth: options.maxNavigationDepth,
     maxHistory: options.maxHistory,
     maxDialogDepth: options.maxDialogDepth,
+    negotiateLanguage: options.negotiateLanguage,
     onError: options.onError,
   });
   for (const d of dialogs) manager.registerDialog(d);
@@ -278,7 +281,12 @@ export async function createHarness(
   bot.use(manager.middleware());
 
   const chatId = 100;
-  const from: User = { id: chatId, is_bot: false, first_name: 'Tester' };
+  const from: User = {
+    id: chatId,
+    is_bot: false,
+    first_name: 'Tester',
+    ...(options.languageCode && { language_code: options.languageCode }),
+  };
   let updateId = 0;
 
   const sendText = (text: string) => {

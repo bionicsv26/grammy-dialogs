@@ -468,4 +468,45 @@ describe('DialogManager', () => {
     expect(h.methods()).not.toContain('sendPhoto');
     expect(h.session()?.messageId).toBe(before);
   });
+
+  // ───Negotiation языка ─────────────────────────────────────────────────────
+  it('язык определяется из language_code при первом контакте', async () => {
+    const h = await createHarness(undefined, { languageCode: 'en-US' });
+    await h.sendText('/start');
+
+    expect(h.session()?.lang).toBe('en');
+    expect(h.lastPayload('sendMessage').text).toBe('Root');
+  });
+
+  it('неизвестный язык откатывается к defaultLang', async () => {
+    const h = await createHarness(undefined, { languageCode: 'fr' });
+    await h.sendText('/start');
+
+    expect(h.session()?.lang).toBeUndefined();
+    expect(h.lastPayload('sendMessage').text).toBe('Корень');
+  });
+
+  it('явный выбор языка важнее language_code', async () => {
+    const h = await createHarness(undefined, { languageCode: 'en-US' });
+    await h.sendText('/start');
+    expect(h.session()?.lang).toBe('en');
+
+    await h.click(coreCallbacks.lang('ru'));
+    expect(h.session()?.lang).toBe('ru');
+    expect(h.lastPayload('editMessageText').text).toBe('Корень');
+
+    await h.click('next');
+    expect(h.lastPayload('editMessageText').text).toBe('Форма');
+  });
+
+  it('negotiateLanguage: false отключает автоопределение', async () => {
+    const h = await createHarness(undefined, {
+      languageCode: 'en-US',
+      negotiateLanguage: false,
+    });
+    await h.sendText('/start');
+
+    expect(h.session()?.lang).toBeUndefined();
+    expect(h.lastPayload('sendMessage').text).toBe('Корень');
+  });
 });

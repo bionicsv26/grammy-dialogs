@@ -32,7 +32,7 @@ type FormId = 'greet' | 'ask_name' | 'done';
 type Ctx = DialogContext<FormState>;
 
 const bot = new Bot<Ctx>(process.env.BOT_TOKEN!);
-bot.use(session({ initial: (): DialogSession => ({ stack: [], lang: 'ru' }) }));
+bot.use(session({ initial: (): DialogSession => ({ stack: [] }) }));
 
 const manager = new DialogManager<FormState, FormId, string>({ rootDialogId: 'form' });
 const win = defineWindow<FormState, FormId, string>();
@@ -143,6 +143,12 @@ render: () => ({ kind: 'photo', photo: fileIdOrUrl, caption: 'Подпись', k
 `caption` ограничен 1024 символами (о превышении пишется предупреждение в лог).
 
 ## i18n и экранирование
+При первом контакте язык определяется из `ctx.from.language_code` (`en-US` → `en`),
+если для него есть словарь; иначе используется `defaultLang`. Явный выбор пользователя
+кнопкой `coreCallbacks.lang(...)` всегда имеет приоритет. Отключается опцией
+`negotiateLanguage: false`.
+Не задавай `lang` в `initial` — иначе автоопределение не сработает.
+Язык проставит ядро: из `language_code`, затем кнопкой пользователя, иначе `defaultLang`.
 
 ```ts
 new DialogManager({

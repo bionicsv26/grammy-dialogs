@@ -17,7 +17,7 @@ type Ctx = DialogContext<FormState>;
 
 const bot = new Bot<Ctx>(process.env.BOT_TOKEN!);
 
-bot.use(session({ initial: (): DialogSession => ({ stack: [], lang: 'ru' }) }));
+bot.use(session({ initial: (): DialogSession => ({ stack: [] }) }));
 
 const manager = new DialogManager<FormState, FormId, string>({ rootDialogId: 'form' });
 const win = defineWindow<FormState, FormId, string>();

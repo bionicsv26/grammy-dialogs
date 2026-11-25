@@ -76,7 +76,7 @@ bot.use(sequentialize((ctx) => sessionKey(ctx) ?? 'no-chat'));
 bot.use(
   session({
     getSessionKey: sessionKey,
-    initial: (): DialogSession => ({ stack: [], lang: 'ru' }),
+    initial: (): DialogSession => ({ stack: [] }),
     storage,
   })
 );

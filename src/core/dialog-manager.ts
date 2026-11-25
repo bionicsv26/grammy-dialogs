@@ -224,6 +224,7 @@ export interface DialogManagerOptions<
   translations?:
   | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
   | undefined;
+
   defaultLang?: string | undefined;
   rootDialogId?: string | undefined;
   parseMode?: ParseMode | undefined;
@@ -233,6 +234,11 @@ export interface DialogManagerOptions<
   maxDialogDepth?: number | undefined;
   /** Логгер ядра. По умолчанию — no-op (библиотека молчит, пока не попросишь). */
   logger?: DialogLogger | undefined;
+  /**
+ * Определять язык из ctx.from.language_code при первом контакте,
+ * если session.lang ещё не задан. По умолчанию true.
+ */
+  negotiateLanguage?: boolean | undefined;
 }
 
 type AnyWindowConfig = WindowConfig<any, any, any, any>;
@@ -304,7 +310,7 @@ export class DialogManager<
   private maxDialogDepth: number;
   private navDepth = new WeakMap<object, number>();
   private handlingError = new WeakSet<object>();
-
+  private negotiateLanguage: boolean;
 
   constructor(options?: DialogManagerOptions<TState, TId, TKeys>) {
     this.log = options?.logger ?? noopLogger;
@@ -315,6 +321,7 @@ export class DialogManager<
     this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
     this.maxHistory = Math.max(0, options?.maxHistory ?? 50);
     this.maxDialogDepth = Math.max(1, options?.maxDialogDepth ?? 8);
+    this.negotiateLanguage = options?.negotiateLanguage ?? true;
 
     const merged: Record<string, Record<string, string>> = {};
     for (const [lang, dict] of Object.entries(coreTranslations)) {
@@ -374,12 +381,14 @@ export class DialogManager<
     return stack[stack.length - 1];
   }
 
-    /** ID зарегистрированных диалогов — для стартовой диагностики. */
+  /** ID зарегистрированных диалогов — для стартовой диагностики. */
   public registeredDialogIds(): string[] {
     return [...this.dialogs.keys()];
   }
 
+  /** Привязывает контекст к сессии: язык и активный фрейм. */
   private bind(ctx: DialogContext<any>): DialogFrame | undefined {
+    this.ensureLanguage(ctx);
     const frame = this.getFrame(ctx);
     if (frame) {
       ctx.frame = frame;
@@ -412,6 +421,26 @@ export class DialogManager<
           : match
       );
     };
+  }
+
+  /**
+ * Первый контакт: берём язык из Telegram, если для него есть словарь.
+ * Явный выбор пользователя (session.lang) всегда важнее.
+ */
+  private ensureLanguage(ctx: DialogContext<TState>): void {
+    if (!this.negotiateLanguage || ctx.session.lang) return;
+
+    const raw = ctx.from?.language_code;
+    if (!raw) return;
+
+    const base = raw.split('-')[0]?.toLowerCase(); // en-US → en
+    if (base && this.translations[base]) {
+      ctx.session.lang = base;
+      this.log.info(`Language negotiated from Telegram`, {
+        userId: ctx.from?.id, lang: base,
+      });
+    }
+    // Нет словаря — оставляем lang незаданным, сработает defaultLang.
   }
 
   async setLanguage(ctx: DialogContext<TState>, lang: string): Promise<void> {
