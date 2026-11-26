@@ -76,5 +76,5 @@
 - 35 тестов ядра на Vitest с перехватом Telegram API через transformer.
 
 [Unreleased]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.1.0...v0.2.0
+[0.2.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.1.0
