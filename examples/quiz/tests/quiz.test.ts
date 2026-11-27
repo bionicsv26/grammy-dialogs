@@ -77,7 +77,7 @@ describe('quiz example', () => {
 
     await t.click('do_restart');
     expect(t.frame()?.window).toBe('welcome');
-    expect(t.data().answers ?? {}).toEqual({});
+    expect(t.data().answers).toEqual({});
   });
 
   it('confirm → cancel возвращает в result', async () => {

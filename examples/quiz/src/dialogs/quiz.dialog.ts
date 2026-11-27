@@ -2,7 +2,6 @@ import { InlineKeyboard } from 'grammy';
 import {
   defineDialog,
   defineWindow,
-  type DialogContext,
   type WindowActionHandler,
 } from '@bionicsv/grammy-dialogs';
 import type { QuizKeys } from '../translations.js';
@@ -10,6 +9,7 @@ import type { QuizKeys } from '../translations.js';
 // ─── Модель ─────────────────────────────────────────────────────────────────
 interface Question {
   id: string;
+  /** URL или file_id. В проде лучше file_id: Telegram не скачивает каждый раз. */
   image: string;
   textKey: QuizKeys;
   options: { id: string; label: string; correct: boolean }[];
@@ -50,18 +50,13 @@ const QUESTIONS: readonly Question[] = [
 
 // ─── Типы ───────────────────────────────────────────────────────────────────
 interface QuizState {
-  answers?: Record<string, string>;
-  step?: number;
+  answers: Record<string, string>; // questionId -> option.id
+  step?: number;                   // только для окна question
 }
 
 type QuizId = 'welcome' | 'question' | 'summary' | 'result' | 'confirm';
 type QuestionResult = { step: number; answer: string };
-
 type Action = WindowActionHandler<QuizState, QuizId, QuizKeys>;
-
-/** Начальное состояние приходится создавать вручную — см. находку №5. */
-const answersOf = (ctx: DialogContext<QuizState>): Record<string, string> =>
-  (ctx.data.answers ??= {});
 
 // ─── Диалог ─────────────────────────────────────────────────────────────────
 export function createQuizDialog() {
@@ -84,7 +79,9 @@ export function createQuizDialog() {
 
   return defineDialog<QuizState, QuizId, QuizKeys>({
     id: 'quiz',
+    initialData: () => ({ answers: {} }),
     windows: [
+      // ── welcome ─────────────────────────────────────────────────────────
       {
         id: 'welcome',
         disableBackButton: true,
@@ -98,7 +95,7 @@ export function createQuizDialog() {
         },
         onDialogResult: (ctx, m, _t, result) => {
           const r = result as QuestionResult;
-          answersOf(ctx)[QUESTIONS[r.step].id] = r.answer;
+          ctx.data.answers[QUESTIONS[r.step].id] = r.answer;
 
           const nextStep = r.step + 1;
           if (nextStep < QUESTIONS.length) {
@@ -111,14 +108,12 @@ export function createQuizDialog() {
         },
       },
 
+      // ── question (запускается поверх welcome/summary) ───────────────────
       win({
         id: 'question',
-        // ВНИМАНИЕ: guard мутирует состояние — нарушение контракта чистоты.
-        // Нет хука onEnter/onStartData, приходится выкручиваться. Находка №3.
-        guard: (ctx) => {
+        onEnter: (ctx) => {
           const sd = ctx.frame.startData as { step?: number } | undefined;
-          if (sd && typeof sd.step === 'number') ctx.data.step = sd.step;
-          return true;
+          if (typeof sd?.step === 'number') ctx.data.step = sd.step;
         },
         render: (ctx, t) => {
           const q = QUESTIONS[ctx.data.step ?? 0];
@@ -133,15 +128,15 @@ export function createQuizDialog() {
         actions: answerActions,
       }),
 
+      // ── summary ─────────────────────────────────────────────────────────
       {
         id: 'summary',
         disableBackButton: true,
         render: (ctx, t) => {
-          const answers = answersOf(ctx);
           const keyboard = new InlineKeyboard();
 
           QUESTIONS.forEach((q, i) => {
-            const picked = answers[q.id];
+            const picked = ctx.data.answers[q.id];
             const label = picked
               ? q.options.find((o) => o.id === picked)?.label ?? picked
               : '—';
@@ -161,18 +156,18 @@ export function createQuizDialog() {
         },
         onDialogResult: async (ctx, m, _t, result) => {
           const r = result as QuestionResult;
-          answersOf(ctx)[QUESTIONS[r.step].id] = r.answer;
+          ctx.data.answers[QUESTIONS[r.step].id] = r.answer;
           await m.show(ctx);
         },
       },
 
+      // ── result ──────────────────────────────────────────────────────────
       {
         id: 'result',
         disableBackButton: true,
         render: (ctx, t) => {
-          const answers = answersOf(ctx);
           const correct = QUESTIONS.filter((q) => {
-            const picked = answers[q.id];
+            const picked = ctx.data.answers[q.id];
             return picked && q.options.find((o) => o.id === picked)?.correct;
           }).length;
 
@@ -200,6 +195,7 @@ export function createQuizDialog() {
         },
       },
 
+      // ── confirm (вложенный запуск поверх result) ────────────────────────
       {
         id: 'confirm',
         disableBackButton: true,
