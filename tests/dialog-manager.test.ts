@@ -509,4 +509,49 @@ describe('DialogManager', () => {
     expect(h.session()?.lang).toBeUndefined();
     expect(h.lastPayload('sendMessage').text).toBe('Корень');
   });
+
+  // ─── Начальное состояние и вход в окно ────────────────────────────────────
+  it('initialData: состояние инициализируется при старте', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_seeded');
+
+    expect(h.frame()?.data.name).toBe('init');
+    expect(h.frame()?.data.hits).toBe(1); // onEnter отработал
+  });
+
+  it('initialData: каждый запуск получает свою копию', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_seeded');
+
+    h.frame()!.data.name = 'changed';
+    await h.click('nest');
+
+    expect(h.stack()).toHaveLength(3);
+    expect(h.frame()?.data.name).toBe('init');
+    expect(h.stack()[1]?.data.name).toBe('changed');
+  });
+
+  it('onEnter: не вызывается при перерисовке', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_seeded');
+    expect(h.frame()?.data.hits).toBe(1);
+
+    await h.click('again');
+    expect(h.frame()?.data.hits).toBe(1);
+
+    await h.click('to_other');
+    await h.click('back');
+    expect(h.frame()?.data.hits).toBe(2); // повторный вход — вызывается
+  });
+
+  it('onEnter: видит startData', async () => {
+    const h = await createHarness();
+    await h.sendText('/start');
+    await h.click('to_seeded_data');
+
+    expect(h.frame()?.data.name).toBe('fromStart');
+  });
 });

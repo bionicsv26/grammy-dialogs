@@ -149,6 +149,21 @@ export type WindowResultHandler<
   result: unknown
 ) => Promise<void> | void;
 
+/**
+ * Вызывается при входе в окно (goTo / goBack / startDialog), но НЕ при
+ * перерисовке через show. В отличие от guard, имеет право менять состояние.
+ * Навигацию из него делать не нужно — для редиректов есть guard.
+ */
+export type WindowEnterHandler<
+  TState extends Record<string, any>,
+  TId extends string,
+  TKeys extends string = string
+> = (
+  ctx: DialogContext<TState>,
+  manager: DialogManager<TState, TId, TKeys>,
+  t: TranslationFunction<TKeys>
+) => Promise<void> | void;
+
 export type WindowInputFormatter<TValue = string> = (rawInput: string) => TValue;
 
 /** Бросай из formatter, чтобы показать пользователю своё сообщение об ошибке. */
@@ -172,6 +187,7 @@ export interface WindowConfig<
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
   onInput?: WindowInputHandler<TState, TId, TKeys, TValue>;
+  onEnter?: WindowEnterHandler<TState, TId, TKeys>;
   onDialogResult?: WindowResultHandler<TState, TId, TKeys>;
   formatter?: WindowInputFormatter<TValue>;
   inputSchema?: z.ZodType<TValue>;
@@ -188,6 +204,11 @@ export interface DialogConfig<
   id: string;
   /** По умолчанию — первое окно массива. */
   entry?: TId | undefined;
+  /**
+   * Начальное состояние каждого запуска диалога.
+   * Объект клонируется на каждый старт, фабрика вызывается заново.
+   */
+  initialData?: TState | (() => TState) | undefined;
   windows: readonly WindowConfig<TState, TId, TKeys, any>[];
 }
 
@@ -251,6 +272,7 @@ type AnyErrorHandler = (
 interface RegisteredDialog {
   entry: string;
   windows: Map<string, AnyWindowConfig>;
+  initialData: (() => Record<string, any>) | undefined;
 }
 
 type RenderContent =
@@ -363,15 +385,22 @@ export class DialogManager<
     }
 
     const first = dialog.windows[0];
-    if (!first) {
-      throw new Error(`Dialog "${dialog.id}" has no windows.`);
-    }
+    if (!first) throw new Error(`Dialog "${dialog.id}" has no windows.`);
+
     const entry = dialog.entry ?? first.id;
     if (!windows.has(entry)) {
       throw new Error(`Entry window "${entry}" is not defined in dialog "${dialog.id}".`);
     }
 
-    this.dialogs.set(dialog.id, { entry, windows });
+    const init = dialog.initialData;
+    const initialData =
+      init === undefined
+        ? undefined
+        : typeof init === 'function'
+          ? (init as () => Record<string, any>)
+          : () => structuredClone(init) as Record<string, any>;
+
+    this.dialogs.set(dialog.id, { entry, windows, initialData });
     return this;
   }
 
@@ -399,6 +428,15 @@ export class DialogManager<
 
   private resolveWindow(frame: DialogFrame): AnyWindowConfig | undefined {
     return this.dialogs.get(frame.dialog)?.windows.get(frame.window);
+  }
+
+  private async runEnter(ctx: DialogContext<TState>): Promise<void> {
+    const frame = this.getFrame(ctx);
+    if (!frame) return;
+    const window = this.resolveWindow(frame);
+    if (window?.onEnter) {
+      await window.onEnter(ctx, this, this.getTranslator(ctx));
+    }
   }
 
   public getTranslator(ctx: DialogContext<TState>): TranslationFunction<TKeys> {
@@ -523,7 +561,7 @@ export class DialogManager<
   async startDialog(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {}
   ): Promise<void> {
     try {
       const dialog = this.dialogs.get(dialogId);
@@ -551,10 +589,11 @@ export class DialogManager<
         dialog: dialogId,
         window: entry,
         history: [],
-        data: {},
+        data: dialog.initialData ? dialog.initialData() : {},
         ...(options.startData !== undefined && { startData: options.startData }),
       });
       this.bind(ctx);
+      await this.runEnter(ctx);
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
@@ -605,7 +644,7 @@ export class DialogManager<
   async resetDialog(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {}
   ): Promise<void> {
     ctx.session.stack = [];
     await this.startDialog(ctx, dialogId, options);
@@ -615,7 +654,7 @@ export class DialogManager<
   async restart(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {}
   ): Promise<void> {
     try {
       if (ctx.session.messageId && ctx.chat) {
@@ -679,6 +718,7 @@ export class DialogManager<
       });
 
       frame.window = windowId;
+      await this.runEnter(ctx);
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);
@@ -698,6 +738,7 @@ export class DialogManager<
       const previousWindow = frame.history.pop() as TId;
       delete ctx.data.error;
       frame.window = previousWindow;
+      await this.runEnter(ctx);
       await this.show(ctx);
     } catch (error) {
       await this.handleError(error, ctx);

@@ -14,6 +14,7 @@ import { createDialogTest } from '../src/core/testing.js';
 
 export interface TestState {
   name?: string;
+  hits?: number;
 }
 
 export type TestId =
@@ -81,6 +82,9 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
           alert: async (ctx) => {
             await ctx.answerCallbackQuery({ text: 'ALERT', show_alert: true });
           },
+          to_seeded: (ctx, m) => m.startDialog(ctx, 'seeded'),
+          to_seeded_data: (ctx, m) =>
+            m.startDialog(ctx, 'seeded', { startData: { name: 'fromStart' } }),
         },
       },
       win({
@@ -167,7 +171,33 @@ export function baseDialogs(): readonly DialogConfig<any, any, any>[] {
     ],
   });
 
-  return [main, other];
+  const seeded = defineDialog<TestState, 'seed_home' | 'seed_other', TestKeys>({
+    id: 'seeded',
+    initialData: { name: 'init', hits: 0 },
+    windows: [
+      {
+        id: 'seed_home',
+        onEnter: (ctx) => {
+          ctx.data.hits = (ctx.data.hits ?? 0) + 1;
+          const sd = ctx.frame.startData as { name?: string } | undefined;
+          if (sd?.name) ctx.data.name = sd.name;
+        },
+        render: (ctx) => ({ text: `seed:${ctx.data.name ?? ''}:${ctx.data.hits ?? 0}` }),
+        actions: {
+          again: (ctx, m) => m.show(ctx),
+          to_other: (ctx, m) => m.goTo(ctx, 'seed_other'),
+          nest: (ctx, m) => m.startDialog(ctx, 'seeded'),
+        },
+      },
+      {
+        id: 'seed_other',
+        render: () => ({ text: 'seed-other' }),
+        actions: { back: (ctx, m) => m.goBack(ctx) },
+      },
+    ],
+  });
+
+  return [main, other, seeded];
 }
 
 export async function createHarness(
