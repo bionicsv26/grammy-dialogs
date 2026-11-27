@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-27
+
 ### Added
 - `initialData` в `defineDialog`: начальное состояние диалога. Объект клонируется на каждый запуск, фабрика вызывается заново — экземпляры диалога не разделяют состояние.
 - Хук окна `onEnter`: вызывается при входе в окно (`goTo`, `goBack`, `startDialog`), но не при перерисовке через `show`. В отличие от `guard`, имеет право менять состояние — например, инициализировать поля из `startData`.
@@ -79,6 +81,7 @@
 - Пример бота (`examples/bot`) и компилируемый quickstart (`examples/quickstart`), оба под `typecheck`.
 - 35 тестов ядра на Vitest с перехватом Telegram API через transformer.
 
-[Unreleased]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bionicsv26/grammy-dialogs/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.3.0
 [0.2.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/bionicsv26/grammy-dialogs/releases/tag/v0.1.0
