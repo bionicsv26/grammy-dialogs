@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@bionicsv/grammy-dialogs": "^0.3.0",
+    "@bionicsv/grammy-dialogs": "*",
     "grammy": "^1.46.0",
     "zod": "^4.0.0"
   },

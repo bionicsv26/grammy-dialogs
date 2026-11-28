@@ -39,6 +39,7 @@
       "import": "./dist/testing.js"
     }
   },
+  "workspaces": ["examples/quiz"],
   "publishConfig": {
     "access": "public"
   },
@@ -49,8 +50,11 @@
     "dev": "tsx watch examples/bot/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "typecheck:quiz": "npm run typecheck -w grammy-dialogs-quiz-example",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:quiz": "npm run test -w grammy-dialogs-quiz-example",
+    "test:all": "npm run test && npm run test:quiz",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
