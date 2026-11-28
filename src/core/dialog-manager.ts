@@ -1,29 +1,33 @@
-import { Context, InlineKeyboard, InputFile } from 'grammy';
-import type { InputMedia } from 'grammy/types';
-import { z } from 'zod';
-import { isMessageNotModified } from './telegram-errors.js';
-import { escapeForMode, type ParseMode } from './parse-mode.js';
+import { Context, InlineKeyboard, InputFile } from "grammy";
+import type { InputMedia } from "grammy/types";
+import { z } from "zod";
+import { isMessageNotModified } from "./telegram-errors.js";
+import { escapeForMode, type ParseMode } from "./parse-mode.js";
 
 // ─── Встроенные core-переводы ядра ──────────────────────────────────────────
 const coreRu = {
-  btn_back: '⬅️ Назад',
-  language_changed: 'Язык изменён',
-  action_not_available: 'Это действие сейчас недоступно',
-  invalid_format: 'Неверный формат ввода',
-  error_fallback: '⚠️ Что-то пошло не так. Попробуйте позже или введите /start.',
+  btn_back: "⬅️ Назад",
+  language_changed: "Язык изменён",
+  action_not_available: "Это действие сейчас недоступно",
+  invalid_format: "Неверный формат ввода",
+  error_fallback:
+    "⚠️ Что-то пошло не так. Попробуйте позже или введите /start.",
 } as const;
 
 export type CoreTranslationKey = keyof typeof coreRu;
 
 const coreEn: Record<CoreTranslationKey, string> = {
-  btn_back: '⬅️ Back',
-  language_changed: 'Language changed',
-  action_not_available: 'This action is not available right now',
-  invalid_format: 'Invalid input format',
-  error_fallback: '⚠️ Something went wrong. Try again later or send /start.',
+  btn_back: "⬅️ Back",
+  language_changed: "Language changed",
+  action_not_available: "This action is not available right now",
+  invalid_format: "Invalid input format",
+  error_fallback: "⚠️ Something went wrong. Try again later or send /start.",
 };
 
-export const coreTranslations: Record<'ru' | 'en', Record<CoreTranslationKey, string>> = {
+export const coreTranslations: Record<
+  "ru" | "en",
+  Record<CoreTranslationKey, string>
+> = {
   ru: coreRu,
   en: coreEn,
 };
@@ -36,11 +40,16 @@ export interface DialogLogger {
   error(message: string, meta?: Record<string, unknown>): void;
 }
 
-const noop = (): void => { };
-const noopLogger: DialogLogger = { debug: noop, info: noop, warn: noop, error: noop };
+const noop = (): void => {};
+const noopLogger: DialogLogger = {
+  debug: noop,
+  info: noop,
+  warn: noop,
+  error: noop,
+};
 
 // ─── Зарезервированный namespace core-callback'ов ───────────────────────────
-export const CALLBACK_NAMESPACE = '__dm';
+export const CALLBACK_NAMESPACE = "__dm";
 const CALLBACK_PREFIX = `${CALLBACK_NAMESPACE}:`;
 const LANG_PREFIX = `${CALLBACK_NAMESPACE}:lang:`;
 
@@ -57,7 +66,7 @@ function assertValidCallbackData(data: string, context: string): void {
   const bytes = textEncoder.encode(data).length;
   if (bytes === 0 || bytes > CALLBACK_DATA_MAX_BYTES) {
     throw new Error(
-      `callback_data for ${context} must be 1-${CALLBACK_DATA_MAX_BYTES} bytes (UTF-8), got ${bytes}: "${data}"`
+      `callback_data for ${context} must be 1-${CALLBACK_DATA_MAX_BYTES} bytes (UTF-8), got ${bytes}: "${data}"`,
     );
   }
 }
@@ -74,12 +83,12 @@ export interface DialogFrame {
 export interface DialogSession {
   lang?: string;
   messageId?: number;
-  messageKind?: 'text' | MediaKind;
+  messageKind?: "text" | MediaKind;
   stack: DialogFrame[]; // последний элемент — активный диалог
 }
 
 export type DialogContext<
-  TState extends Record<string, any> = Record<string, any>
+  TState extends Record<string, any> = Record<string, any>,
 > = Context & {
   session: DialogSession;
   frame: DialogFrame;
@@ -89,38 +98,68 @@ export type DialogContext<
 // ─── Типы переводов и окон ──────────────────────────────────────────────────
 export type TranslationFunction<TKeys extends string = string> = (
   key: TKeys | CoreTranslationKey,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ) => string;
 
-export type MediaKind = 'photo' | 'document' | 'video' | 'animation';
+export type MediaKind = "photo" | "document" | "video" | "animation";
+
+/**
+ * Контракт диалога: что он принимает при запуске и что возвращает через done().
+ * Объявляется необязательно; без него значения типизированы как unknown.
+ */
+export type ContractStart<C> = C extends { start: infer S } ? S : unknown;
+export type ContractResult<C> = C extends { result: infer R } ? R : unknown;
+
+/** Стирание типов для внутреннего реестра. */
+type AnyContract = { start: any; result: any };
 
 export type WindowRenderResult =
-  | { kind?: 'text'; text: string; keyboard?: InlineKeyboard }
-  | { kind: 'photo'; photo: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
-  | { kind: 'document'; document: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
-  | { kind: 'video'; video: InputFile | string; caption?: string; keyboard?: InlineKeyboard }
-  | { kind: 'animation'; animation: InputFile | string; caption?: string; keyboard?: InlineKeyboard };
+  | { kind?: "text"; text: string; keyboard?: InlineKeyboard }
+  | {
+      kind: "photo";
+      photo: InputFile | string;
+      caption?: string;
+      keyboard?: InlineKeyboard;
+    }
+  | {
+      kind: "document";
+      document: InputFile | string;
+      caption?: string;
+      keyboard?: InlineKeyboard;
+    }
+  | {
+      kind: "video";
+      video: InputFile | string;
+      caption?: string;
+      keyboard?: InlineKeyboard;
+    }
+  | {
+      kind: "animation";
+      animation: InputFile | string;
+      caption?: string;
+      keyboard?: InlineKeyboard;
+    };
 
 export type WindowActionHandler<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
-  t: TranslationFunction<TKeys>
+  t: TranslationFunction<TKeys>,
 ) => Promise<void> | void;
 
 export type WindowInputHandler<
   TState extends Record<string, any>,
   TId extends string,
   TKeys extends string = string,
-  TValue = string
+  TValue = string,
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
   t: TranslationFunction<TKeys>,
-  value: TValue
+  value: TValue,
 ) => Promise<void> | void;
 
 /**
@@ -130,23 +169,24 @@ export type WindowInputHandler<
 export type WindowGuard<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
-  t: TranslationFunction<TKeys>
+  t: TranslationFunction<TKeys>,
 ) => Promise<boolean | TId> | boolean | TId;
 
 /** Вызывается у родительского окна, когда поддиалог завершился через done(). */
 export type WindowResultHandler<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TResult = unknown,
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
   t: TranslationFunction<TKeys>,
-  result: unknown
+  result: TResult,
 ) => Promise<void> | void;
 
 /**
@@ -157,20 +197,24 @@ export type WindowResultHandler<
 export type WindowEnterHandler<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TStart = unknown,
 > = (
   ctx: DialogContext<TState>,
   manager: DialogManager<TState, TId, TKeys>,
-  t: TranslationFunction<TKeys>
+  t: TranslationFunction<TKeys>,
+  startData: TStart,
 ) => Promise<void> | void;
 
-export type WindowInputFormatter<TValue = string> = (rawInput: string) => TValue;
+export type WindowInputFormatter<TValue = string> = (
+  rawInput: string,
+) => TValue;
 
 /** Бросай из formatter, чтобы показать пользователю своё сообщение об ошибке. */
 export class InputValidationError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'InputValidationError';
+    this.name = "InputValidationError";
   }
 }
 
@@ -178,17 +222,23 @@ export interface WindowConfig<
   TState extends Record<string, any>,
   TId extends string,
   TKeys extends string = string,
-  TValue = string
+  TValue = unknown,
+  TContract = {},
 > {
   id: TId;
   render: (
     ctx: DialogContext<TState>,
-    t: TranslationFunction<TKeys>
+    t: TranslationFunction<TKeys>,
   ) => Promise<WindowRenderResult> | WindowRenderResult;
   actions?: Record<string, WindowActionHandler<TState, TId, TKeys>>;
   onInput?: WindowInputHandler<TState, TId, TKeys, TValue>;
-  onEnter?: WindowEnterHandler<TState, TId, TKeys>;
-  onDialogResult?: WindowResultHandler<TState, TId, TKeys>;
+  onEnter?: WindowEnterHandler<TState, TId, TKeys, ContractStart<TContract>>;
+  onDialogResult?: WindowResultHandler<
+    TState,
+    TId,
+    TKeys,
+    ContractResult<TContract>
+  >;
   formatter?: WindowInputFormatter<TValue>;
   inputSchema?: z.ZodType<TValue>;
   guard?: WindowGuard<TState, TId, TKeys>;
@@ -199,52 +249,52 @@ export interface WindowConfig<
 export interface DialogConfig<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TContract = {},
 > {
   id: string;
-  /** По умолчанию — первое окно массива. */
   entry?: TId | undefined;
-  /**
-   * Начальное состояние каждого запуска диалога.
-   * Объект клонируется на каждый старт, фабрика вызывается заново.
-   */
   initialData?: TState | (() => TState) | undefined;
-  windows: readonly WindowConfig<TState, TId, TKeys, any>[];
+  windows: readonly WindowConfig<TState, TId, TKeys, any, TContract>[];
 }
 
 export function defineDialog<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
->(config: DialogConfig<TState, TId, TKeys>): DialogConfig<TState, TId, TKeys> {
-  return config;
+  TKeys extends string = string,
+  TContract = {},
+>(
+  dialog: DialogConfig<TState, TId, TKeys, TContract>,
+): DialogConfig<TState, TId, TKeys, TContract> {
+  return dialog;
 }
 
 export function defineWindow<
   TState extends Record<string, any>,
   TId extends string,
-  TKeys extends string = string
+  TKeys extends string = string,
+  TContract = {},
 >() {
-  return <TValue = string>(
-    window: WindowConfig<TState, TId, TKeys, TValue>
-  ): WindowConfig<TState, TId, TKeys, TValue> => window;
+  return <TValue = unknown>(
+    w: WindowConfig<TState, TId, TKeys, TValue, TContract>,
+  ) => w;
 }
 
 export interface DialogManagerOptions<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
-  TKeys extends string = string
+  TKeys extends string = string,
 > {
   onError?:
-  | ((
-    error: unknown,
-    ctx: DialogContext<TState>,
-    manager: DialogManager<TState, TId, TKeys>
-  ) => Promise<void> | void)
-  | undefined;
+    | ((
+        error: unknown,
+        ctx: DialogContext<TState>,
+        manager: DialogManager<TState, TId, TKeys>,
+      ) => Promise<void> | void)
+    | undefined;
   translations?:
-  | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
-  | undefined;
+    | Record<string, Partial<Record<TKeys | CoreTranslationKey, string>>>
+    | undefined;
 
   defaultLang?: string | undefined;
   rootDialogId?: string | undefined;
@@ -256,17 +306,17 @@ export interface DialogManagerOptions<
   /** Логгер ядра. По умолчанию — no-op (библиотека молчит, пока не попросишь). */
   logger?: DialogLogger | undefined;
   /**
- * Определять язык из ctx.from.language_code при первом контакте,
- * если session.lang ещё не задан. По умолчанию true.
- */
+   * Определять язык из ctx.from.language_code при первом контакте,
+   * если session.lang ещё не задан. По умолчанию true.
+   */
   negotiateLanguage?: boolean | undefined;
 }
 
-type AnyWindowConfig = WindowConfig<any, any, any, any>;
+type AnyWindowConfig = WindowConfig<any, any, any, any, AnyContract>;
 type AnyErrorHandler = (
   error: unknown,
   ctx: DialogContext<any>,
-  manager: DialogManager<any, any, any>
+  manager: DialogManager<any, any, any>,
 ) => Promise<void> | void;
 
 interface RegisteredDialog {
@@ -276,30 +326,34 @@ interface RegisteredDialog {
 }
 
 type RenderContent =
-  | { kind: 'text'; text: string }
+  | { kind: "text"; text: string }
   | { kind: MediaKind; file: InputFile | string; caption?: string | undefined };
 
 function toContent(r: WindowRenderResult): RenderContent {
-  if (r.kind === undefined || r.kind === 'text') {
-    return { kind: 'text', text: r.text };
+  if (r.kind === undefined || r.kind === "text") {
+    return { kind: "text", text: r.text };
   }
   switch (r.kind) {
-    case 'photo':
-      return { kind: 'photo', file: r.photo, caption: r.caption };
-    case 'document':
-      return { kind: 'document', file: r.document, caption: r.caption };
-    case 'video':
-      return { kind: 'video', file: r.video, caption: r.caption };
-    case 'animation':
-      return { kind: 'animation', file: r.animation, caption: r.caption };
+    case "photo":
+      return { kind: "photo", file: r.photo, caption: r.caption };
+    case "document":
+      return { kind: "document", file: r.document, caption: r.caption };
+    case "video":
+      return { kind: "video", file: r.video, caption: r.caption };
+    case "animation":
+      return { kind: "animation", file: r.animation, caption: r.caption };
     default:
       throw new Error(`Unsupported render result kind`);
   }
 }
 
 function toInputMedia(
-  c: { kind: MediaKind; file: InputFile | string; caption?: string | undefined },
-  parseMode: ParseMode
+  c: {
+    kind: MediaKind;
+    file: InputFile | string;
+    caption?: string | undefined;
+  },
+  parseMode: ParseMode,
 ): InputMedia {
   const common = {
     media: c.file,
@@ -307,10 +361,14 @@ function toInputMedia(
     ...(c.caption !== undefined && { caption: c.caption }),
   };
   switch (c.kind) {
-    case 'photo': return { type: 'photo', ...common };
-    case 'document': return { type: 'document', ...common };
-    case 'video': return { type: 'video', ...common };
-    case 'animation': return { type: 'animation', ...common };
+    case "photo":
+      return { type: "photo", ...common };
+    case "document":
+      return { type: "document", ...common };
+    case "video":
+      return { type: "video", ...common };
+    case "animation":
+      return { type: "animation", ...common };
   }
 }
 
@@ -318,7 +376,7 @@ function toInputMedia(
 export class DialogManager<
   TState extends Record<string, any> = Record<string, any>,
   TId extends string = string,
-  TKeys extends string = string
+  TKeys extends string = string,
 > {
   private log: DialogLogger;
   private dialogs = new Map<string, RegisteredDialog>();
@@ -337,9 +395,9 @@ export class DialogManager<
   constructor(options?: DialogManagerOptions<TState, TId, TKeys>) {
     this.log = options?.logger ?? noopLogger;
     this.errorHandler = options?.onError;
-    this.defaultLang = options?.defaultLang ?? 'ru';
+    this.defaultLang = options?.defaultLang ?? "ru";
     this.rootDialogId = options?.rootDialogId;
-    this.parseMode = options?.parseMode ?? 'HTML';
+    this.parseMode = options?.parseMode ?? "HTML";
     this.maxNavigationDepth = options?.maxNavigationDepth ?? 10;
     this.maxHistory = Math.max(0, options?.maxHistory ?? 50);
     this.maxDialogDepth = Math.max(1, options?.maxDialogDepth ?? 8);
@@ -354,15 +412,15 @@ export class DialogManager<
       for (const [lang, dict] of Object.entries(userTranslations)) {
         const target = (merged[lang] ??= {});
         for (const [key, value] of Object.entries(dict)) {
-          if (typeof value === 'string') target[key] = value;
+          if (typeof value === "string") target[key] = value;
         }
       }
     }
     this.translations = merged;
   }
 
-  registerDialog<TS extends Record<string, any>, TI extends string>(
-    dialog: DialogConfig<TS, TI, TKeys>
+  public registerDialog<TS extends Record<string, any>, TI extends string>(
+    dialog: DialogConfig<TS, TI, TKeys, AnyContract>,
   ): this {
     if (this.dialogs.has(dialog.id)) {
       throw new Error(`Dialog "${dialog.id}" is already registered.`);
@@ -371,15 +429,20 @@ export class DialogManager<
     const windows = new Map<string, AnyWindowConfig>();
     for (const w of dialog.windows) {
       if (windows.has(w.id)) {
-        throw new Error(`Window "${w.id}" is already registered in dialog "${dialog.id}".`);
+        throw new Error(
+          `Window "${w.id}" is already registered in dialog "${dialog.id}".`,
+        );
       }
       for (const actionKey of Object.keys(w.actions ?? {})) {
         if (actionKey.startsWith(CALLBACK_PREFIX)) {
           throw new Error(
-            `Action key "${actionKey}" in window "${w.id}" uses the reserved namespace "${CALLBACK_PREFIX}".`
+            `Action key "${actionKey}" in window "${w.id}" uses the reserved namespace "${CALLBACK_PREFIX}".`,
           );
         }
-        assertValidCallbackData(actionKey, `action "${actionKey}" in window "${w.id}"`);
+        assertValidCallbackData(
+          actionKey,
+          `action "${actionKey}" in window "${w.id}"`,
+        );
       }
       windows.set(w.id, w as AnyWindowConfig);
     }
@@ -389,14 +452,16 @@ export class DialogManager<
 
     const entry = dialog.entry ?? first.id;
     if (!windows.has(entry)) {
-      throw new Error(`Entry window "${entry}" is not defined in dialog "${dialog.id}".`);
+      throw new Error(
+        `Entry window "${entry}" is not defined in dialog "${dialog.id}".`,
+      );
     }
 
     const init = dialog.initialData;
     const initialData =
       init === undefined
         ? undefined
-        : typeof init === 'function'
+        : typeof init === "function"
           ? (init as () => Record<string, any>)
           : () => structuredClone(init) as Record<string, any>;
 
@@ -435,14 +500,17 @@ export class DialogManager<
     if (!frame) return;
     const window = this.resolveWindow(frame);
     if (window?.onEnter) {
-      await window.onEnter(ctx, this, this.getTranslator(ctx));
+      await window.onEnter(ctx, this, this.getTranslator(ctx), frame.startData);
     }
   }
 
   public getTranslator(ctx: DialogContext<TState>): TranslationFunction<TKeys> {
     const lang = ctx.session.lang ?? this.defaultLang;
 
-    return (key: TKeys | CoreTranslationKey, params?: Record<string, string | number>): string => {
+    return (
+      key: TKeys | CoreTranslationKey,
+      params?: Record<string, string | number>,
+    ): string => {
       const text =
         this.translations[lang]?.[key] ??
         this.translations[this.defaultLang]?.[key];
@@ -456,26 +524,27 @@ export class DialogManager<
       return text.replace(/\{(\w+)\}/g, (match, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name)
           ? escapeForMode(String(params[name]), this.parseMode)
-          : match
+          : match,
       );
     };
   }
 
   /**
- * Первый контакт: берём язык из Telegram, если для него есть словарь.
- * Явный выбор пользователя (session.lang) всегда важнее.
- */
+   * Первый контакт: берём язык из Telegram, если для него есть словарь.
+   * Явный выбор пользователя (session.lang) всегда важнее.
+   */
   private ensureLanguage(ctx: DialogContext<TState>): void {
     if (!this.negotiateLanguage || ctx.session.lang) return;
 
     const raw = ctx.from?.language_code;
     if (!raw) return;
 
-    const base = raw.split('-')[0]?.toLowerCase(); // en-US → en
+    const base = raw.split("-")[0]?.toLowerCase(); // en-US → en
     if (base && this.translations[base]) {
       ctx.session.lang = base;
       this.log.info(`Language negotiated from Telegram`, {
-        userId: ctx.from?.id, lang: base,
+        userId: ctx.from?.id,
+        lang: base,
       });
     }
     // Нет словаря — оставляем lang незаданным, сработает defaultLang.
@@ -489,7 +558,7 @@ export class DialogManager<
 
   static appendBackButton(
     keyboard: InlineKeyboard,
-    text: string = coreTranslations.en.btn_back
+    text: string = coreTranslations.en.btn_back,
   ): InlineKeyboard {
     const result = keyboard.clone();
     const rows = result.inline_keyboard;
@@ -505,32 +574,39 @@ export class DialogManager<
 
   private async answerCallback(
     ctx: DialogContext<TState>,
-    other?: Parameters<DialogContext<TState>['answerCallbackQuery']>[0]
+    other?: Parameters<DialogContext<TState>["answerCallbackQuery"]>[0],
   ): Promise<void> {
     if (!ctx.callbackQuery || ctx.callbackQuery.inline_message_id) return;
-    await ctx.answerCallbackQuery(other).catch(() => { });
+    await ctx.answerCallbackQuery(other).catch(() => {});
   }
 
   private async sendContent(
     ctx: DialogContext<TState>,
     content: RenderContent,
-    other: { parse_mode: ParseMode; reply_markup?: InlineKeyboard }
+    other: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
   ) {
-    if (content.kind === 'text') return ctx.reply(content.text, other);
+    if (content.kind === "text") return ctx.reply(content.text, other);
 
     const mediaOther = {
       ...other,
       ...(content.caption !== undefined && { caption: content.caption }),
     };
     switch (content.kind) {
-      case 'photo': return ctx.replyWithPhoto(content.file, mediaOther);
-      case 'document': return ctx.replyWithDocument(content.file, mediaOther);
-      case 'video': return ctx.replyWithVideo(content.file, mediaOther);
-      case 'animation': return ctx.replyWithAnimation(content.file, mediaOther);
+      case "photo":
+        return ctx.replyWithPhoto(content.file, mediaOther);
+      case "document":
+        return ctx.replyWithDocument(content.file, mediaOther);
+      case "video":
+        return ctx.replyWithVideo(content.file, mediaOther);
+      case "animation":
+        return ctx.replyWithAnimation(content.file, mediaOther);
     }
   }
 
-  private async handleError(error: unknown, ctx: DialogContext<TState>): Promise<void> {
+  private async handleError(
+    error: unknown,
+    ctx: DialogContext<TState>,
+  ): Promise<void> {
     const frame = this.getFrame(ctx);
     this.log.error(`DialogManager execution error`, {
       userId: ctx.from?.id,
@@ -548,10 +624,14 @@ export class DialogManager<
           await this.errorHandler(error, ctx, this);
           return;
         } catch (handlerError) {
-          this.log.error(`Error occurred inside custom onError handler`, { handlerError });
+          this.log.error(`Error occurred inside custom onError handler`, {
+            handlerError,
+          });
         }
       }
-      await ctx.reply(this.getTranslator(ctx)('error_fallback')).catch(() => { });
+      await ctx
+        .reply(this.getTranslator(ctx)("error_fallback"))
+        .catch(() => {});
     } finally {
       this.handlingError.delete(ctx);
     }
@@ -561,7 +641,7 @@ export class DialogManager<
   async startDialog(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string | undefined } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {},
   ): Promise<void> {
     try {
       const dialog = this.dialogs.get(dialogId);
@@ -569,7 +649,9 @@ export class DialogManager<
 
       const entry = options.entry ?? dialog.entry;
       if (!dialog.windows.has(entry)) {
-        throw new Error(`Entry window "${entry}" is not defined in dialog "${dialogId}".`);
+        throw new Error(
+          `Entry window "${entry}" is not defined in dialog "${dialogId}".`,
+        );
       }
 
       if (!ctx.session.stack) ctx.session.stack = [];
@@ -577,12 +659,15 @@ export class DialogManager<
 
       if (stack.length >= this.maxDialogDepth) {
         throw new Error(
-          `Dialog stack depth limit (${this.maxDialogDepth}) exceeded when starting "${dialogId}".`
+          `Dialog stack depth limit (${this.maxDialogDepth}) exceeded when starting "${dialogId}".`,
         );
       }
 
       this.log.info(`Starting dialog`, {
-        userId: ctx.from?.id, dialogId, entry, depth: stack.length + 1,
+        userId: ctx.from?.id,
+        dialogId,
+        entry,
+        depth: stack.length + 1,
       });
 
       stack.push({
@@ -590,7 +675,9 @@ export class DialogManager<
         window: entry,
         history: [],
         data: dialog.initialData ? dialog.initialData() : {},
-        ...(options.startData !== undefined && { startData: options.startData }),
+        ...(options.startData !== undefined && {
+          startData: options.startData,
+        }),
       });
       this.bind(ctx);
       await this.runEnter(ctx);
@@ -605,13 +692,17 @@ export class DialogManager<
     try {
       const stack = ctx.session.stack;
       if (!stack || stack.length === 0) {
-        this.log.warn(`Attempted to finish dialog, but stack is empty`, { userId: ctx.from?.id });
+        this.log.warn(`Attempted to finish dialog, but stack is empty`, {
+          userId: ctx.from?.id,
+        });
         return;
       }
 
       const finished = stack.pop();
       this.log.info(`Dialog finished`, {
-        userId: ctx.from?.id, dialog: finished?.dialog, remaining: stack.length,
+        userId: ctx.from?.id,
+        dialog: finished?.dialog,
+        remaining: stack.length,
       });
 
       if (stack.length === 0) {
@@ -644,7 +735,7 @@ export class DialogManager<
   async resetDialog(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string | undefined } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {},
   ): Promise<void> {
     ctx.session.stack = [];
     await this.startDialog(ctx, dialogId, options);
@@ -654,7 +745,7 @@ export class DialogManager<
   async restart(
     ctx: DialogContext<TState>,
     dialogId: string,
-    options: { startData?: unknown; entry?: string | undefined } = {}
+    options: { startData?: unknown; entry?: string | undefined } = {},
   ): Promise<void> {
     try {
       if (ctx.session.messageId && ctx.chat) {
@@ -662,7 +753,7 @@ export class DialogManager<
           .editMessageReplyMarkup(ctx.chat.id, ctx.session.messageId, {
             reply_markup: { inline_keyboard: [] },
           })
-          .catch(() => { });
+          .catch(() => {});
       }
       delete ctx.session.messageId;
       delete ctx.session.messageKind;
@@ -675,7 +766,7 @@ export class DialogManager<
   async goTo(
     ctx: DialogContext<TState>,
     windowId: TId,
-    options: { pushHistory?: boolean } = {}
+    options: { pushHistory?: boolean } = {},
   ): Promise<void> {
     const depth = this.navDepth.get(ctx) ?? 0;
     this.navDepth.set(ctx, depth + 1);
@@ -683,7 +774,7 @@ export class DialogManager<
       if (depth >= this.maxNavigationDepth) {
         throw new Error(
           `Navigation depth limit (${this.maxNavigationDepth}) exceeded at window "${windowId}". ` +
-          `Possible guard redirect cycle.`
+            `Possible guard redirect cycle.`,
         );
       }
 
@@ -692,7 +783,9 @@ export class DialogManager<
 
       const dialog = this.dialogs.get(frame.dialog);
       if (!dialog?.windows.has(windowId)) {
-        throw new Error(`Window "${windowId}" is not registered in dialog "${frame.dialog}".`);
+        throw new Error(
+          `Window "${windowId}" is not registered in dialog "${frame.dialog}".`,
+        );
       }
 
       if (frame.window === windowId) {
@@ -731,7 +824,9 @@ export class DialogManager<
     try {
       const frame = this.bind(ctx);
       if (!frame || frame.history.length === 0) {
-        this.log.warn(`Attempted to go back, but history is empty`, { userId: ctx.from?.id });
+        this.log.warn(`Attempted to go back, but history is empty`, {
+          userId: ctx.from?.id,
+        });
         return;
       }
 
@@ -750,14 +845,18 @@ export class DialogManager<
       const userId = ctx.from?.id;
       const frame = this.bind(ctx);
       if (!frame) {
-        this.log.warn(`Attempted to show window, but no active dialog`, { userId });
+        this.log.warn(`Attempted to show window, but no active dialog`, {
+          userId,
+        });
         return;
       }
 
       const window = this.resolveWindow(frame);
       if (!window) {
         this.log.error(`Window not found in registry during show`, {
-          userId, dialog: frame.dialog, windowId: frame.window,
+          userId,
+          dialog: frame.dialog,
+          windowId: frame.window,
         });
         return;
       }
@@ -767,10 +866,13 @@ export class DialogManager<
       if (window.guard) {
         const guardResult = await window.guard(ctx, this, t);
         if (guardResult === false) {
-          this.log.warn(`Window guard blocked access (render halted)`, { userId, windowId: frame.window });
+          this.log.warn(`Window guard blocked access (render halted)`, {
+            userId,
+            windowId: frame.window,
+          });
           return;
         }
-        if (typeof guardResult === 'string' && guardResult !== frame.window) {
+        if (typeof guardResult === "string" && guardResult !== frame.window) {
           await this.goTo(ctx, guardResult as TId, { pushHistory: false });
           return;
         }
@@ -780,65 +882,91 @@ export class DialogManager<
       const content = toContent(rendered);
       let keyboard = rendered.keyboard;
 
-      const shouldShowBack = frame.history.length > 0 && !window.disableBackButton;
+      const shouldShowBack =
+        frame.history.length > 0 && !window.disableBackButton;
       if (shouldShowBack) {
         keyboard = DialogManager.appendBackButton(
           keyboard ?? new InlineKeyboard(),
-          t('btn_back')
+          t("btn_back"),
         );
       }
 
       if (keyboard) {
         for (const row of keyboard.inline_keyboard) {
           for (const button of row) {
-            if ('callback_data' in button && typeof button.callback_data === 'string') {
-              assertValidCallbackData(button.callback_data, `button in window "${frame.window}"`);
+            if (
+              "callback_data" in button &&
+              typeof button.callback_data === "string"
+            ) {
+              assertValidCallbackData(
+                button.callback_data,
+                `button in window "${frame.window}"`,
+              );
             }
           }
         }
       }
 
-      if (content.kind !== 'text' && content.caption && content.caption.length > 1024) {
+      if (
+        content.kind !== "text" &&
+        content.caption &&
+        content.caption.length > 1024
+      ) {
         this.log.warn(`Media caption exceeds Telegram limit`, {
-          windowId: frame.window, length: content.caption.length,
+          windowId: frame.window,
+          length: content.caption.length,
         });
       }
 
-      const otherOptions: { parse_mode: ParseMode; reply_markup?: InlineKeyboard } = {
+      const otherOptions: {
+        parse_mode: ParseMode;
+        reply_markup?: InlineKeyboard;
+      } = {
         parse_mode: this.parseMode,
       };
       if (keyboard) otherOptions.reply_markup = keyboard;
 
       const prevId = ctx.session.messageId;
-      const prevKind = ctx.session.messageKind ?? 'text';
+      const prevKind = ctx.session.messageKind ?? "text";
       // Текст и медиа редактируются по-разному; переход между ними — только заменой.
-      const sameFamily = (content.kind === 'text') === (prevKind === 'text');
+      const sameFamily = (content.kind === "text") === (prevKind === "text");
 
       if (prevId !== undefined && ctx.chat && sameFamily) {
         try {
-          if (content.kind === 'text') {
-            await ctx.api.editMessageText(ctx.chat.id, prevId, content.text, otherOptions);
+          if (content.kind === "text") {
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              prevId,
+              content.text,
+              otherOptions,
+            );
           } else {
             await ctx.api.editMessageMedia(
               ctx.chat.id,
               prevId,
               toInputMedia(content, this.parseMode),
-              keyboard ? { reply_markup: keyboard } : {}
+              keyboard ? { reply_markup: keyboard } : {},
             );
             ctx.session.messageKind = content.kind;
           }
           return;
         } catch (error) {
           if (isMessageNotModified(error)) {
-            this.log.debug(`Message is already up to date`, { userId, windowId: frame.window });
+            this.log.debug(`Message is already up to date`, {
+              userId,
+              windowId: frame.window,
+            });
             return;
           }
-          this.log.debug(`Failed to edit message, sending a new one`, { userId, error });
+          this.log.debug(`Failed to edit message, sending a new one`, {
+            userId,
+            error,
+          });
           delete ctx.session.messageId;
           delete ctx.session.messageKind;
         }
       } else if (prevId !== undefined && ctx.chat) {
-        await ctx.api.deleteMessage(ctx.chat.id, prevId).catch(() => { });
+        await ctx.api.deleteMessage(ctx.chat.id, prevId).catch(() => {});
         delete ctx.session.messageId;
         delete ctx.session.messageKind;
       }
@@ -856,7 +984,7 @@ export class DialogManager<
   middleware() {
     return async (
       ctx: DialogContext<TState>,
-      next: () => Promise<void>
+      next: () => Promise<void>,
     ): Promise<void> => {
       try {
         const userId = ctx.from?.id;
@@ -866,7 +994,9 @@ export class DialogManager<
         if (ctx.callbackQuery) {
           const original = ctx.answerCallbackQuery.bind(ctx);
           let answered = false;
-          ctx.answerCallbackQuery = async (other?: Parameters<typeof original>[0]) => {
+          ctx.answerCallbackQuery = async (
+            other?: Parameters<typeof original>[0],
+          ) => {
             if (answered) return true;
             const result = await original(other);
             answered = true;
@@ -885,11 +1015,14 @@ export class DialogManager<
         if (window.guard) {
           const guardResult = await window.guard(ctx, this, t);
           if (guardResult === false) {
-            this.log.warn(`Window guard blocked middleware action`, { userId, windowId: frame.window });
+            this.log.warn(`Window guard blocked middleware action`, {
+              userId,
+              windowId: frame.window,
+            });
             await this.answerCallback(ctx);
             return;
           }
-          if (typeof guardResult === 'string' && guardResult !== frame.window) {
+          if (typeof guardResult === "string" && guardResult !== frame.window) {
             await this.goTo(ctx, guardResult as TId, { pushHistory: false });
             return;
           }
@@ -898,26 +1031,41 @@ export class DialogManager<
         // 1. Инлайн-кнопки
         if (ctx.callbackQuery && ctx.callbackQuery.data) {
           const actionKey = ctx.callbackQuery.data;
-          this.log.debug(`User triggered action`, { userId, dialog: frame.dialog, windowId: frame.window, actionKey });
+          this.log.debug(`User triggered action`, {
+            userId,
+            dialog: frame.dialog,
+            windowId: frame.window,
+            actionKey,
+          });
 
           if (actionKey === coreCallbacks.back) {
-            try { await this.goBack(ctx); }
-            finally { await this.answerCallback(ctx); }
+            try {
+              await this.goBack(ctx);
+            } finally {
+              await this.answerCallback(ctx);
+            }
             return;
           }
 
-          if (actionKey === coreCallbacks.root && this.rootDialogId !== undefined) {
-            try { await this.resetDialog(ctx, this.rootDialogId); }
-            finally { await this.answerCallback(ctx); }
+          if (
+            actionKey === coreCallbacks.root &&
+            this.rootDialogId !== undefined
+          ) {
+            try {
+              await this.resetDialog(ctx, this.rootDialogId);
+            } finally {
+              await this.answerCallback(ctx);
+            }
             return;
           }
 
           if (actionKey.startsWith(LANG_PREFIX)) {
             const newLang = actionKey.slice(LANG_PREFIX.length);
-            try { await this.setLanguage(ctx, newLang); }
-            finally {
+            try {
+              await this.setLanguage(ctx, newLang);
+            } finally {
               await this.answerCallback(ctx, {
-                text: this.getTranslator(ctx)('language_changed'),
+                text: this.getTranslator(ctx)("language_changed"),
               });
             }
             return;
@@ -926,8 +1074,12 @@ export class DialogManager<
           const actionHandler = window.actions?.[actionKey];
 
           if (!actionHandler) {
-            this.log.warn(`Action handler not found`, { userId, windowId: frame.window, actionKey });
-            await this.answerCallback(ctx, { text: t('action_not_available') });
+            this.log.warn(`Action handler not found`, {
+              userId,
+              windowId: frame.window,
+              actionKey,
+            });
+            await this.answerCallback(ctx, { text: t("action_not_available") });
             return next();
           }
 
@@ -935,7 +1087,10 @@ export class DialogManager<
             await actionHandler(ctx, this, t);
           } catch (error) {
             this.log.error(`Error occurred while executing action handler`, {
-              userId, windowId: frame.window, actionKey, error,
+              userId,
+              windowId: frame.window,
+              actionKey,
+              error,
             });
             await this.handleError(error, ctx);
           } finally {
@@ -950,9 +1105,9 @@ export class DialogManager<
           ctx.message.text &&
           (window.inputSchema || window.onInput || window.formatter)
         ) {
-          if (ctx.message.text.startsWith('/')) return next();
+          if (ctx.message.text.startsWith("/")) return next();
 
-          await ctx.deleteMessage().catch(() => { });
+          await ctx.deleteMessage().catch(() => {});
 
           const rawInput = ctx.message.text.trim();
           let value: unknown = rawInput;
@@ -962,10 +1117,15 @@ export class DialogManager<
               value = window.formatter(rawInput);
             } catch (error) {
               const userMessage =
-                error instanceof InputValidationError ? error.message : t('invalid_format');
+                error instanceof InputValidationError
+                  ? error.message
+                  : t("invalid_format");
 
               this.log.warn(`Window input formatter failed`, {
-                userId, windowId: frame.window, inputLength: rawInput.length, error,
+                userId,
+                windowId: frame.window,
+                inputLength: rawInput.length,
+                error,
               });
 
               ctx.data.error = userMessage;
@@ -978,10 +1138,14 @@ export class DialogManager<
             const parseResult = window.inputSchema.safeParse(value);
 
             if (!parseResult.success) {
-              const firstError = parseResult.error.issues[0]?.message || t('invalid_format');
+              const firstError =
+                parseResult.error.issues[0]?.message || t("invalid_format");
 
               this.log.warn(`Window input validation failed`, {
-                userId, windowId: frame.window, error: firstError, inputLength: rawInput.length,
+                userId,
+                windowId: frame.window,
+                error: firstError,
+                inputLength: rawInput.length,
               });
 
               ctx.data.error = firstError;
@@ -999,7 +1163,9 @@ export class DialogManager<
               await window.onInput(ctx, this, t, value);
             } catch (error) {
               this.log.error(`Error occurred while executing onInput handler`, {
-                userId, windowId: frame.window, error,
+                userId,
+                windowId: frame.window,
+                error,
               });
               await this.handleError(error, ctx);
             }
